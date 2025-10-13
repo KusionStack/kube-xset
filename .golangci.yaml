@@ -1,0 +1,78 @@
+version: "2"
+linters:
+  default: standard
+  enable:
+    - bodyclose
+    - copyloopvar
+    - ginkgolinter
+    - testifylint
+    - misspell
+    - nakedret
+    - unconvert
+    - unparam
+    - whitespace
+    - gocritic
+    - errorlint
+  settings:
+    govet:
+      enable:
+        - shadow
+    misspell:
+      locale: US
+    staticcheck:
+      checks:
+       - "-QF1008"
+    gocritic:
+      enable-all: true
+      disabled-checks:
+        - emptyStringTest
+        - ifElseChain
+        - singleCaseSwitch
+        - hugeParam
+        - unnamedResult
+        - whyNoLint
+        - tooManyResultsChecker
+  exclusions:
+    generated: lax
+    presets:
+      - comments
+      - common-false-positives
+      - legacy
+      - std-error-handling
+    rules:
+      - linters:
+        - errcheck
+        - unparam
+        path: _test.go
+      - linters:
+          - govet
+        text: declaration of "err" shadows declaration at line
+    paths:
+      - third_party$
+      - builtin$
+      - examples$
+formatters:
+  enable:
+    - gofumpt # drop in replacement for gofmt
+    - gci # format imports
+  settings:
+    gci:
+      custom-order: true
+      sections:
+        - standard
+        - blank
+        - dot
+        - default
+        - localmodule
+    gofumpt:
+      extra-rules: true
+  exclusions:
+    generated: lax
+    paths:
+      - third_party$
+      - builtin$
+      - examples$
+
+run:
+  allow-parallel-runners: true
+  timeout: 10m
