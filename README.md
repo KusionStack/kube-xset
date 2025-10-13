@@ -1,5 +1,4 @@
 # kube-xset
-[![FOSSA Status](https://app.fossa.com/api/projects/git%2Bgithub.com%2FKusionStack%2Fkube-xset.svg?type=shield)](https://app.fossa.com/projects/git%2Bgithub.com%2FKusionStack%2Fkube-xset?ref=badge_shield)
 
 A Kubernetes utility package for managing various operations—such as scaling, upgrading, and replacing—on a set of Kubernetes resources.
 
@@ -16,6 +15,3 @@ A Kubernetes utility package for managing various operations—such as scaling, 
 We welcome everyone to participate in construction with us. Visit the [Contribution Guide](docs/contributing.md)
 to understand how to participate in the contribution KusionStack project.
 If you have any questions, please [Submit the Issue](https://github.com/KusionStack/kube-xset/issues).
-
-## License
-[![FOSSA Status](https://app.fossa.com/api/projects/git%2Bgithub.com%2FKusionStack%2Fkube-xset.svg?type=large)](https://app.fossa.com/projects/git%2Bgithub.com%2FKusionStack%2Fkube-xset?ref=badge_large)
