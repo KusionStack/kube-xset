@@ -25,11 +25,11 @@ import (
 	appsv1 "k8s.io/api/apps/v1"
 	apimachineryvalidation "k8s.io/apimachinery/pkg/api/validation"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-	"sigs.k8s.io/controller-runtime/pkg/client"
-
 	clientutils "kusionstack.io/kube-utils/client"
 	"kusionstack.io/kube-utils/condition"
 	controllerutils "kusionstack.io/kube-utils/controller/utils"
+	"sigs.k8s.io/controller-runtime/pkg/client"
+
 	"kusionstack.io/kube-xset/api"
 )
 

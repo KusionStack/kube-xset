@@ -29,10 +29,10 @@ import (
 	"k8s.io/apimachinery/pkg/util/sets"
 	"k8s.io/client-go/util/retry"
 	"k8s.io/utils/ptr"
-	"sigs.k8s.io/controller-runtime/pkg/client"
-
 	clientutil "kusionstack.io/kube-utils/client"
 	controllerutils "kusionstack.io/kube-utils/controller/utils"
+	"sigs.k8s.io/controller-runtime/pkg/client"
+
 	"kusionstack.io/kube-xset/api"
 	"kusionstack.io/kube-xset/opslifecycle"
 	"kusionstack.io/kube-xset/subresources"

@@ -30,13 +30,13 @@ import (
 	"k8s.io/apimachinery/pkg/util/rand"
 	"k8s.io/apimachinery/pkg/util/sets"
 	appsv1alpha1 "kusionstack.io/kube-api/apps/v1alpha1"
-	"sigs.k8s.io/controller-runtime/pkg/cache"
-	"sigs.k8s.io/controller-runtime/pkg/client"
-
 	kubeutilclient "kusionstack.io/kube-utils/client"
 	"kusionstack.io/kube-utils/controller/expectations"
 	"kusionstack.io/kube-utils/controller/mixin"
 	refmanagerutil "kusionstack.io/kube-utils/controller/refmanager"
+	"sigs.k8s.io/controller-runtime/pkg/cache"
+	"sigs.k8s.io/controller-runtime/pkg/client"
+
 	"kusionstack.io/kube-xset/api"
 )
 

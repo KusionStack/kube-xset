@@ -25,10 +25,10 @@ import (
 	"k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/apimachinery/pkg/util/sets"
-	"sigs.k8s.io/controller-runtime/pkg/client"
-
 	clientutil "kusionstack.io/kube-utils/client"
 	"kusionstack.io/kube-utils/controller/expectations"
+	"sigs.k8s.io/controller-runtime/pkg/client"
+
 	"kusionstack.io/kube-xset/api"
 )
 

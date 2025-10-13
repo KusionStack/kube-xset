@@ -26,11 +26,11 @@ import (
 	"k8s.io/apimachinery/pkg/fields"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/runtime/schema"
+	"kusionstack.io/kube-utils/controller/mixin"
+	refmanagerutil "kusionstack.io/kube-utils/controller/refmanager"
 	"sigs.k8s.io/controller-runtime/pkg/cache"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
-	"kusionstack.io/kube-utils/controller/mixin"
-	refmanagerutil "kusionstack.io/kube-utils/controller/refmanager"
 	"kusionstack.io/kube-xset/api"
 )
 

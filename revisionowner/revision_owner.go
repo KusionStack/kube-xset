@@ -23,8 +23,8 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/apimachinery/pkg/util/sets"
-
 	"kusionstack.io/kube-utils/controller/history"
+
 	"kusionstack.io/kube-xset/api"
 	"kusionstack.io/kube-xset/xcontrol"
 )
