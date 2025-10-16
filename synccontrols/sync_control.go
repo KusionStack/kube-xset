@@ -165,7 +165,7 @@ func (r *RealSyncControl) SyncTargets(ctx context.Context, instance api.XSetObje
 	// get owned IDs
 	var ownedIDs map[int]*api.ContextDetail
 	if err = retry.RetryOnConflict(retry.DefaultRetry, func() error {
-		ownedIDs, err = r.resourceContextControl.AllocateID(ctx, instance, syncContext.UpdatedRevision.GetName(), int(ptr.Deref(xspec.Replicas, 0)))
+		ownedIDs, err = r.resourceContextControl.AllocateID(ctx, instance, syncContext.UpdatedRevision.GetName(), int(ptr.Deref(xspec.Replicas, 0)), syncContext.FilteredTarget)
 		syncContext.OwnedIds = ownedIDs
 		return err
 	}); err != nil {
@@ -181,7 +181,7 @@ func (r *RealSyncControl) SyncTargets(ctx context.Context, instance api.XSetObje
 	for i := range syncContext.FilteredTarget {
 		target := syncContext.FilteredTarget[i]
 		xName := target.GetName()
-		id, _ := GetInstanceID(r.xsetLabelAnnoMgr, target)
+		id, _ := xcontrol.GetInstanceID(r.xsetLabelAnnoMgr, target)
 		toDelete := toDeleteTargetNames.Has(xName)
 		toExclude := toExcludeTargetNames.Has(xName)
 
@@ -938,7 +938,7 @@ func (r *RealSyncControl) getAvailableTargetIDs(
 	var newOwnedIDs map[int]*api.ContextDetail
 	var err error
 	if err := retry.RetryOnConflict(retry.DefaultRetry, func() error {
-		newOwnedIDs, err = r.resourceContextControl.AllocateID(ctx, instance, syncContext.UpdatedRevision.GetName(), len(ownedIDs)+diff)
+		newOwnedIDs, err = r.resourceContextControl.AllocateID(ctx, instance, syncContext.UpdatedRevision.GetName(), len(ownedIDs)+diff, nil)
 		return err
 	}); err != nil {
 		return nil, ownedIDs, fmt.Errorf("fail to allocate IDs using context when include Targets: %w", err)

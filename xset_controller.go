@@ -89,7 +89,7 @@ func SetUpWithManager(mgr ctrl.Manager, xsetController api.XSetController) error
 		return err
 	}
 	cacheExpectations := expectations.NewxCacheExpectations(reconcilerMixin.Client, reconcilerMixin.Scheme, clock.RealClock{})
-	resourceContextControl := resourcecontexts.NewRealResourceContextControl(reconcilerMixin.Client, xsetController, resourceContextAdapter, resourceContextGVK, cacheExpectations)
+	resourceContextControl := resourcecontexts.NewRealResourceContextControl(reconcilerMixin, xsetController, resourceContextAdapter, resourceContextGVK, cacheExpectations, xsetLabelManager)
 	pvcControl, err := subresources.NewRealPvcControl(reconcilerMixin, cacheExpectations, xsetLabelManager, xsetController)
 	if err != nil {
 		return errors.New("failed to create pvc control")
