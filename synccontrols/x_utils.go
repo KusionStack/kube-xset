@@ -89,13 +89,22 @@ func AddOrUpdateCondition(status *api.XSetStatus, conditionType api.XSetConditio
 	existCond := condition.GetCondition(status.Conditions, string(conditionType))
 	if existCond != nil && existCond.Reason == reason && existCond.Status == condStatus {
 		now := metav1.Now()
-		if now.Sub(existCond.LastTransitionTime.Time) < ConditionUpdatePeriodBackOff {
+		if now.Sub(existCond.LastTransitionTime.Time) < ConditionUpdatePeriodBackOff || existCond.Message == message {
 			return
 		}
 	}
 
 	cond := condition.NewCondition(string(conditionType), condStatus, reason, message)
 	status.Conditions = condition.SetCondition(status.Conditions, *cond)
+
+	// update last transition time
+	for i := range status.Conditions {
+		c := status.Conditions[i]
+		if c.Type == string(conditionType) {
+			status.Conditions[i].LastTransitionTime = metav1.Now()
+			return
+		}
+	}
 }
 
 func GetTargetsPrefix(controllerName string) string {
