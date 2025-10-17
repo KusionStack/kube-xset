@@ -190,11 +190,11 @@ func (r *RealSyncControl) replaceOriginTargets(
 				corev1.EventTypeNormal,
 				"CreatePairTarget",
 				"succeed to create replace pair Target %s/%s with revision %s by replace",
-				originTarget.GetNamespace(),
-				originTarget.GetName(),
+				newCreatedTarget.GetNamespace(),
+				newCreatedTarget.GetName(),
 				replaceRevision.GetName())
 
-			if err := r.cacheExpectations.ExpectCreation(clientutil.ObjectKeyString(instance), r.targetGVK, newTarget.GetNamespace(), newTarget.GetName()); err != nil {
+			if err := r.cacheExpectations.ExpectCreation(clientutil.ObjectKeyString(instance), r.targetGVK, newCreatedTarget.GetNamespace(), newCreatedTarget.GetName()); err != nil {
 				return err
 			}
 
@@ -209,8 +209,8 @@ func (r *RealSyncControl) replaceOriginTargets(
 				corev1.EventTypeNormal,
 				"ReplaceTarget",
 				"failed to create replace pair Target %s/%s from revision %s by replace update: %s",
-				originTarget.GetNamespace(),
-				originTarget.GetName(),
+				newTarget.GetNamespace(),
+				newTarget.GetName(),
 				replaceRevision.GetName(),
 				err.Error())
 			return err
@@ -332,8 +332,8 @@ func updateReplaceOriginTarget(
 				corev1.EventTypeNormal,
 				"DeleteOldNewTarget",
 				"succeed to delete replace new Target %s/%s by label to-replace",
-				originTarget.GetNamespace(),
-				originTarget.GetName(),
+				newTarget.GetNamespace(),
+				newTarget.GetName(),
 			)
 		}
 	}
@@ -429,13 +429,13 @@ func (r *RealSyncControl) mapReplaceNewToOriginTargetContext(ownedIDs map[int]*a
 	for id, contextDetail := range ownedIDs {
 		if val, exist := r.resourceContextControl.Get(contextDetail, api.EnumReplaceNewTargetIDContextDataKey); exist {
 			newTargetId, _ := strconv.ParseInt(val, 10, 32)
-			newTargetContextDetail, exist := ownedIDs[int(newTargetId)]
-			originTargetId, _ := r.resourceContextControl.Get(newTargetContextDetail, api.EnumReplaceOriginTargetIDContextDataKey)
-			if exist && originTargetId == strconv.Itoa(id) {
-				mapNewToOriginTargetContext[id] = newTargetContextDetail
-			} else {
-				mapNewToOriginTargetContext[id] = nil
+			if newTargetContextDetail, exist := ownedIDs[int(newTargetId)]; exist {
+				originTargetId, _ := r.resourceContextControl.Get(newTargetContextDetail, api.EnumReplaceOriginTargetIDContextDataKey)
+				if originTargetId == strconv.Itoa(id) {
+					mapNewToOriginTargetContext[id] = newTargetContextDetail
+				}
 			}
+			mapNewToOriginTargetContext[id] = nil
 		}
 	}
 	return mapNewToOriginTargetContext
@@ -446,13 +446,13 @@ func (r *RealSyncControl) mapReplaceOriginToNewTargetContext(ownedIDs map[int]*a
 	for id, contextDetail := range ownedIDs {
 		if val, exist := r.resourceContextControl.Get(contextDetail, api.EnumReplaceOriginTargetIDContextDataKey); exist {
 			originTargetId, _ := strconv.ParseInt(val, 10, 32)
-			originTargetContextDetail, exist := ownedIDs[int(originTargetId)]
-			newTargetId, _ := r.resourceContextControl.Get(originTargetContextDetail, api.EnumReplaceNewTargetIDContextDataKey)
-			if exist && newTargetId == strconv.Itoa(id) {
-				mapOriginToNewTargetContext[id] = originTargetContextDetail
-			} else {
-				mapOriginToNewTargetContext[id] = nil
+			if originTargetContextDetail, exist := ownedIDs[int(originTargetId)]; exist {
+				newTargetId, _ := r.resourceContextControl.Get(originTargetContextDetail, api.EnumReplaceNewTargetIDContextDataKey)
+				if newTargetId == strconv.Itoa(id) {
+					mapOriginToNewTargetContext[id] = originTargetContextDetail
+				}
 			}
+			mapOriginToNewTargetContext[id] = nil
 		}
 	}
 	return mapOriginToNewTargetContext
