@@ -21,6 +21,7 @@ import (
 	"errors"
 	"sort"
 	"strconv"
+	"time"
 
 	corev1 "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
@@ -36,13 +37,15 @@ import (
 	"kusionstack.io/kube-xset/api"
 	"kusionstack.io/kube-xset/opslifecycle"
 	"kusionstack.io/kube-xset/subresources"
+	"kusionstack.io/kube-xset/xcontrol"
 )
 
 // getTargetsToDelete
 // 1. finds number of diff targets from filteredTargets to do scaleIn
 // 2. finds targets allowed to scale in out of diff
-func (r *RealSyncControl) getTargetsToDelete(xsetObject api.XSetObject, filteredTargets []*TargetWrapper, replaceMapping map[string]*TargetWrapper, diff int) []*TargetWrapper {
+func (r *RealSyncControl) getTargetsToDelete(xsetObject api.XSetObject, filteredTargets []*TargetWrapper, replaceMapping map[string]*TargetWrapper, diff int) ([]*TargetWrapper, *time.Duration) {
 	var countedTargets []*TargetWrapper
+	var recordedRequeueAfter *time.Duration
 	for _, target := range filteredTargets {
 		if _, exist := replaceMapping[target.GetName()]; exist {
 			countedTargets = append(countedTargets, target)
@@ -60,7 +63,8 @@ func (r *RealSyncControl) getTargetsToDelete(xsetObject api.XSetObject, filtered
 	for i, target := range countedTargets {
 		// find targets to be scaleIn out of diff, is allowed to ops
 		spec := r.xsetController.GetXSetSpec(xsetObject)
-		_, allowed := opslifecycle.AllowOps(r.updateConfig.XsetLabelAnnoMgr, r.scaleInLifecycleAdapter, ptr.Deref(spec.ScaleStrategy.OperationDelaySeconds, 0), target)
+		requeueAfter, allowed := opslifecycle.AllowOps(r.updateConfig.XsetLabelAnnoMgr, r.scaleInLifecycleAdapter, ptr.Deref(spec.UpdateStrategy.OperationDelaySeconds, 0), target)
+		recordedRequeueAfter = xcontrol.GetShorterDuration(recordedRequeueAfter, requeueAfter)
 		if i >= diff && !allowed {
 			continue
 		}
@@ -83,7 +87,7 @@ func (r *RealSyncControl) getTargetsToDelete(xsetObject api.XSetObject, filtered
 		needDeleteTargets = append(needDeleteTargets, target)
 	}
 
-	return needDeleteTargets
+	return needDeleteTargets, recordedRequeueAfter
 }
 
 type ActiveTargetsForDeletion struct {
