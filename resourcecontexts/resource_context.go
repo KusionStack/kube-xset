@@ -160,7 +160,7 @@ func (r *RealResourceContextControl) CleanUnusedIDs(ctx context.Context, xsetObj
 			ownedIDs[detail.ID] = detail
 		}
 	}
-	needCleanCount = len(ownedIDs) - maxInt(int(*xsetSpec.Replicas), len(ownedIDs))
+	needCleanCount = len(ownedIDs) - maxInt(int(*xsetSpec.Replicas), len(objs))
 
 	if needCleanCount <= 0 {
 		return nil
