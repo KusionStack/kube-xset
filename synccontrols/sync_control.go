@@ -546,8 +546,8 @@ func (r *RealSyncControl) Scale(ctx context.Context, xsetObject api.XSetObject, 
 				AddOrUpdateCondition(syncContext.NewStatus, api.XSetScale, err, "ScaleOutFailed", err.Error())
 				return succCount > 0, recordedRequeueAfter, err
 			}
-			r.Recorder.Eventf(xsetObject, corev1.EventTypeNormal, "ScaleOut", "scale out %d Target(s)", succCount)
-			AddOrUpdateCondition(syncContext.NewStatus, api.XSetScale, nil, "ScaleOut", "")
+			r.Recorder.Eventf(xsetObject, corev1.EventTypeNormal, "Scaled", "scale out %d Target(s)", succCount)
+			AddOrUpdateCondition(syncContext.NewStatus, api.XSetScale, nil, "Scaled", "")
 			return succCount > 0, recordedRequeueAfter, err
 		}
 	}
@@ -594,7 +594,7 @@ func (r *RealSyncControl) Scale(ctx context.Context, xsetObject api.XSetObject, 
 			AddOrUpdateCondition(syncContext.NewStatus, api.XSetScale, err, "ScaleInFailed", err.Error())
 			return scaling, recordedRequeueAfter, err
 		} else {
-			AddOrUpdateCondition(syncContext.NewStatus, api.XSetScale, nil, "ScaleIn", "")
+			AddOrUpdateCondition(syncContext.NewStatus, api.XSetScale, nil, "Scaled", "")
 		}
 
 		needUpdateContext := false
@@ -636,7 +636,7 @@ func (r *RealSyncControl) Scale(ctx context.Context, xsetObject api.XSetObject, 
 				AddOrUpdateCondition(syncContext.NewStatus, api.XSetScale, err, "ScaleInFailed", fmt.Sprintf("failed to update Context for scaling in: %s", err))
 				return scaling, recordedRequeueAfter, err
 			} else {
-				AddOrUpdateCondition(syncContext.NewStatus, api.XSetScale, nil, "ScaleIn", "")
+				AddOrUpdateCondition(syncContext.NewStatus, api.XSetScale, nil, "Scaled", "")
 			}
 		}
 
@@ -666,13 +666,13 @@ func (r *RealSyncControl) Scale(ctx context.Context, xsetObject api.XSetObject, 
 		scaling = scaling || succCount > 0
 
 		if succCount > 0 {
-			r.Recorder.Eventf(xsetObject, corev1.EventTypeNormal, "ScaleIn", "scale in %d Target(s)", succCount)
+			r.Recorder.Eventf(xsetObject, corev1.EventTypeNormal, "Scaled", "scale in %d Target(s)", succCount)
 		}
 		if err != nil {
 			AddOrUpdateCondition(syncContext.NewStatus, api.XSetScale, err, "ScaleInFailed", fmt.Sprintf("fail to delete Target for scaling in: %s", err))
 			return scaling, recordedRequeueAfter, err
 		} else {
-			AddOrUpdateCondition(syncContext.NewStatus, api.XSetScale, nil, "ScaleIn", "")
+			AddOrUpdateCondition(syncContext.NewStatus, api.XSetScale, nil, "Scaled", "")
 		}
 	}
 
