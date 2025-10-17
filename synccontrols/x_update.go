@@ -381,14 +381,13 @@ func (u *GenericTargetUpdater) FilterAllowOpsTargets(ctx context.Context, candid
 		targetInfo := candidates[i]
 
 		if !targetInfo.PlaceHolder {
-			if !targetInfo.IsAllowUpdateOps {
-				continue
-			}
 			if targetInfo.RequeueForOperationDelay != nil {
 				u.Recorder.Eventf(targetInfo, corev1.EventTypeNormal, "TargetUpdateLifecycle", "delay Target update for %f seconds", targetInfo.RequeueForOperationDelay.Seconds())
 				if recordedRequeueAfter == nil || *targetInfo.RequeueForOperationDelay < *recordedRequeueAfter {
 					recordedRequeueAfter = targetInfo.RequeueForOperationDelay
 				}
+			}
+			if !targetInfo.IsAllowUpdateOps {
 				continue
 			}
 		}

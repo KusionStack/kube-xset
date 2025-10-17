@@ -603,7 +603,8 @@ func (r *RealSyncControl) Scale(ctx context.Context, xsetObject api.XSetObject, 
 
 	if diff <= 0 {
 		// chose the targets to scale in
-		targetsToScaleIn := r.getTargetsToDelete(xsetObject, syncContext.activeTargets, syncContext.replacingMap, diff*-1)
+		targetsToScaleIn, requeueAfter := r.getTargetsToDelete(xsetObject, syncContext.activeTargets, syncContext.replacingMap, diff*-1)
+		recordedRequeueAfter = xcontrol.GetShorterDuration(recordedRequeueAfter, requeueAfter)
 		// filter out Targets need to trigger TargetOpsLifecycle
 		wrapperCh := make(chan *TargetWrapper, len(targetsToScaleIn))
 		for i := range targetsToScaleIn {
@@ -644,18 +645,15 @@ func (r *RealSyncControl) Scale(ctx context.Context, xsetObject api.XSetObject, 
 
 		needUpdateContext := false
 		for i, targetWrapper := range targetsToScaleIn {
-			requeueAfter, allowed := opslifecycle.AllowOps(r.updateConfig.XsetLabelAnnoMgr, r.scaleInLifecycleAdapter, ptr.Deref(spec.ScaleStrategy.OperationDelaySeconds, 0), targetWrapper.Object)
+			requeueAfter, allowed := opslifecycle.AllowOps(r.updateConfig.XsetLabelAnnoMgr, r.scaleInLifecycleAdapter, ptr.Deref(spec.UpdateStrategy.OperationDelaySeconds, 0), targetWrapper.Object)
 			if !allowed && targetWrapper.Object.GetDeletionTimestamp() == nil {
 				r.Recorder.Eventf(targetWrapper.Object, corev1.EventTypeNormal, "TargetScaleInLifecycle", "Target is not allowed to scale in")
 				continue
 			}
 
 			if requeueAfter != nil {
+				recordedRequeueAfter = xcontrol.GetShorterDuration(recordedRequeueAfter, requeueAfter)
 				r.Recorder.Eventf(targetWrapper.Object, corev1.EventTypeNormal, "TargetScaleInLifecycle", "delay Target scale in for %d seconds", requeueAfter.Seconds())
-				if recordedRequeueAfter == nil || *requeueAfter < *recordedRequeueAfter {
-					recordedRequeueAfter = requeueAfter
-				}
-
 				continue
 			}
 

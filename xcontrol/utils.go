@@ -19,6 +19,7 @@ package xcontrol
 import (
 	"fmt"
 	"strconv"
+	"time"
 
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
@@ -43,4 +44,16 @@ func GetInstanceID(xsetLabelAnnoMgr api.XSetLabelAnnotationManager, target clien
 	}
 
 	return int(id), nil
+}
+
+func GetShorterDuration(a, b *time.Duration) *time.Duration {
+	if a == nil {
+		return b
+	} else if b == nil {
+		return a
+	} else if *a < *b {
+		return a
+	} else {
+		return b
+	}
 }
