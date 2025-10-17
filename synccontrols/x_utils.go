@@ -19,7 +19,6 @@ package synccontrols
 import (
 	"context"
 	"fmt"
-	"strconv"
 	"time"
 
 	appsv1 "k8s.io/api/apps/v1"
@@ -32,26 +31,6 @@ import (
 
 	"kusionstack.io/kube-xset/api"
 )
-
-func GetInstanceID(xsetLabelAnnoMgr api.XSetLabelAnnotationManager, target client.Object) (int, error) {
-	if target.GetLabels() == nil {
-		return -1, fmt.Errorf("no labels found for instance ID")
-	}
-
-	instanceIdLabelKey := xsetLabelAnnoMgr.Value(api.XInstanceIdLabelKey)
-	val, exist := target.GetLabels()[instanceIdLabelKey]
-	if !exist {
-		return -1, fmt.Errorf("failed to find instance ID label %s", instanceIdLabelKey)
-	}
-
-	id, err := strconv.ParseInt(val, 10, 32)
-	if err != nil {
-		// ignore invalid target instance ID
-		return -1, fmt.Errorf("failed to parse instance ID with value %s: %w", val, err)
-	}
-
-	return int(id), nil
-}
 
 func NewTargetFrom(setController api.XSetController, xsetLabelAnnoMgr api.XSetLabelAnnotationManager, owner api.XSetObject, revision *appsv1.ControllerRevision, id int, updateFuncs ...func(client.Object) error) (client.Object, error) {
 	targetObj, err := setController.GetXObjectFromRevision(revision)

@@ -37,6 +37,7 @@ import (
 	"kusionstack.io/kube-xset/api"
 	"kusionstack.io/kube-xset/opslifecycle"
 	"kusionstack.io/kube-xset/subresources"
+	"kusionstack.io/kube-xset/xcontrol"
 )
 
 func (r *RealSyncControl) cleanReplaceTargetLabels(
@@ -69,7 +70,7 @@ func (r *RealSyncControl) cleanReplaceTargetLabels(
 			// replace finished, (1) remove ReplaceNewTargetID, ReplaceOriginTargetID key from IDs, (2) try to delete origin Target's ID
 			if labelKey == r.xsetLabelAnnoMgr.Value(api.XReplacePairOriginName) {
 				needUpdateContext = true
-				newTargetId, _ := GetInstanceID(r.xsetLabelAnnoMgr, target)
+				newTargetId, _ := xcontrol.GetInstanceID(r.xsetLabelAnnoMgr, target)
 				if originTargetContext, exist := mapOriginToNewTargetContext[newTargetId]; exist && originTargetContext != nil {
 					r.resourceContextControl.Remove(originTargetContext, api.EnumReplaceNewTargetIDContextDataKey)
 					if _, exist := currentIDs[originTargetContext.ID]; !exist {
@@ -84,7 +85,7 @@ func (r *RealSyncControl) cleanReplaceTargetLabels(
 			_, replaceIndicate := r.xsetLabelAnnoMgr.Get(target.GetLabels(), api.XReplaceIndicationLabelKey)
 			if !replaceIndicate && labelKey == r.xsetLabelAnnoMgr.Value(api.XReplacePairNewId) {
 				needUpdateContext = true
-				originTargetId, _ := GetInstanceID(r.xsetLabelAnnoMgr, target)
+				originTargetId, _ := xcontrol.GetInstanceID(r.xsetLabelAnnoMgr, target)
 				if newTargetContext, exist := mapNewToOriginTargetContext[originTargetId]; exist && newTargetContext != nil {
 					r.resourceContextControl.Remove(newTargetContext, api.EnumReplaceOriginTargetIDContextDataKey)
 					if _, exist := currentIDs[newTargetContext.ID]; !exist {
@@ -122,7 +123,7 @@ func (r *RealSyncControl) replaceOriginTargets(
 	mapNewToOriginTargetContext := r.mapReplaceNewToOriginTargetContext(ownedIDs)
 	successCount, err := controllerutils.SlowStartBatch(len(needReplaceOriginTargets), controllerutils.SlowStartInitialBatchSize, false, func(i int, _ error) error {
 		originTarget := needReplaceOriginTargets[i]
-		originTargetId, _ := GetInstanceID(r.xsetLabelAnnoMgr, originTarget)
+		originTargetId, _ := xcontrol.GetInstanceID(r.xsetLabelAnnoMgr, originTarget)
 
 		if ownedIDs[originTargetId] == nil {
 			r.Recorder.Eventf(instance, corev1.EventTypeWarning, "OriginTargetContext", "cannot found resource context id %d of origin target %s/%s", originTargetId, originTarget.GetNamespace(), originTarget.GetName())
