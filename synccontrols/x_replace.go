@@ -124,7 +124,7 @@ func (r *RealSyncControl) replaceOriginTargets(
 	successCount, err := controllerutils.SlowStartBatch(len(needReplaceOriginTargets), controllerutils.SlowStartInitialBatchSize, false, func(i int, _ error) error {
 		originWrapper := needReplaceOriginTargets[i]
 		originTarget := needReplaceOriginTargets[i].Object
-		originTargetId, _ := GetInstanceID(r.xsetLabelAnnoMgr, originTarget)
+		originTargetId, _ := xcontrol.GetInstanceID(r.xsetLabelAnnoMgr, originTarget)
 
 		if ownedIDs[originTargetId] == nil {
 			r.Recorder.Eventf(instance, corev1.EventTypeWarning, "OriginTargetContext", "cannot found resource context id %d of origin target %s/%s", originTargetId, originTarget.GetNamespace(), originTarget.GetName())
