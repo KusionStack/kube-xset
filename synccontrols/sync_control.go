@@ -169,6 +169,10 @@ func (r *RealSyncControl) SyncTargets(ctx context.Context, instance api.XSetObje
 		return false, fmt.Errorf("fail to deal with include exclude targets: %s", err.Error())
 	}
 
+	if err := r.resourceContextControl.CleanUnusedIDs(ctx, instance, syncContext.FilteredTarget); err != nil {
+		return false, fmt.Errorf("fail to clean unused ids: %w", err)
+	}
+
 	// get owned IDs
 	var ownedIDs map[int]*api.ContextDetail
 	if err = retry.RetryOnConflict(retry.DefaultRetry, func() error {
