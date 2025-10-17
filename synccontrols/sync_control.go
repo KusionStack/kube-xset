@@ -833,7 +833,6 @@ func (r *RealSyncControl) Update(ctx context.Context, xsetObject api.XSetObject,
 				return err
 			}
 		}
-
 		return nil
 	})
 
