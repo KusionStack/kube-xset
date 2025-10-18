@@ -852,7 +852,8 @@ func (r *RealSyncControl) Update(ctx context.Context, xsetObject api.XSetObject,
 	succCount, err = controllerutils.SlowStartBatch(len(targetUpdateInfos), controllerutils.SlowStartInitialBatchSize, false, func(i int, _ error) error {
 		targetInfo := targetUpdateInfos[i]
 
-		if !(targetInfo.IsDuringUpdateOps || targetInfo.IsInReplaceUpdate) || targetInfo.PlaceHolder || targetInfo.GetDeletionTimestamp() != nil {
+		// target are not allowed to finish update: (1) not during update, (2) replace pair new target, (3) placeholder target, (4) terminating target
+		if (!targetInfo.IsDuringUpdateOps && !targetInfo.IsInReplaceUpdate) || targetInfo.ReplacePairOriginTargetName != "" || targetInfo.PlaceHolder || targetInfo.GetDeletionTimestamp() != nil {
 			return nil
 		}
 
