@@ -356,7 +356,7 @@ func (r *RealResourceContextControl) getUnRecordTargetIDs(ownedIDs map[int]*api.
 }
 
 // fulfillOwnedIDs fulfill ids for ownedIDs in order to meet replicas
-func (r *RealResourceContextControl) fulfillOwnedIDs(ownedIDs, existingIDs map[int]*api.ContextDetail, unRecordIDs []int, replicas int, ownerName string, defaultRevision string) map[int]*api.ContextDetail {
+func (r *RealResourceContextControl) fulfillOwnedIDs(ownedIDs, existingIDs map[int]*api.ContextDetail, unRecordIDs []int, replicas int, ownerName, defaultRevision string) map[int]*api.ContextDetail {
 	var fulfilledIDs []int
 	// first use ids from current targets
 	fulfilledIDs = append(fulfilledIDs, unRecordIDs...)
