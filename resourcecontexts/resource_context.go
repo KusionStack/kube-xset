@@ -128,7 +128,7 @@ func (r *RealResourceContextControl) AllocateID(
 	}
 
 	// find new IDs for owner
-	ownedIDs = r.fulfillOwnedIDs(ownedIDs, existingIDs, unRecordedIDs, replicas, xsetObject, defaultRevision)
+	ownedIDs = r.fulfillOwnedIDs(ownedIDs, existingIDs, unRecordedIDs, replicas, xsetObject.GetName(), defaultRevision)
 
 	if notFound {
 		return ownedIDs, r.doCreateTargetContext(ctx, xsetObject, ownedIDs)
@@ -356,30 +356,29 @@ func (r *RealResourceContextControl) getUnRecordTargetIDs(ownedIDs map[int]*api.
 }
 
 // fulfillOwnedIDs fulfill ids for ownedIDs in order to meet replicas
-func (r *RealResourceContextControl) fulfillOwnedIDs(ownedIDs, existingIDs map[int]*api.ContextDetail, unRecordIDs []int, replicas int, obj client.Object, defaultRevision string) map[int]*api.ContextDetail {
+func (r *RealResourceContextControl) fulfillOwnedIDs(ownedIDs, existingIDs map[int]*api.ContextDetail, unRecordIDs []int, replicas int, ownerName string, defaultRevision string) map[int]*api.ContextDetail {
 	var fulfilledIDs []int
 	// first use ids from current targets
 	fulfilledIDs = append(fulfilledIDs, unRecordIDs...)
+
 	// use new ids from 0 inorder
-	candidateID := 0
-	for len(ownedIDs)+len(fulfilledIDs) < replicas {
-		// find one new ID
-		for {
-			if _, exist := existingIDs[candidateID]; exist {
-				candidateID++
-				continue
-			}
-			fulfilledIDs = append(fulfilledIDs, candidateID)
+	for id := 0; ; id++ {
+		if len(fulfilledIDs) >= replicas-len(ownedIDs) {
 			break
 		}
+		if _, exist := existingIDs[id]; exist {
+			continue
+		}
+		fulfilledIDs = append(fulfilledIDs, id)
 	}
+
 	// fulfill ownedIDs
 	for i := range fulfilledIDs {
 		detail := &api.ContextDetail{
 			ID: fulfilledIDs[i],
 			// TODO choose just create target' revision according to scaleStrategy
 			Data: map[string]string{
-				r.resourceContextKeys[api.EnumOwnerContextKey]:          obj.GetName(),
+				r.resourceContextKeys[api.EnumOwnerContextKey]:          ownerName,
 				r.resourceContextKeys[api.EnumRevisionContextDataKey]:   defaultRevision,
 				r.resourceContextKeys[api.EnumJustCreateContextDataKey]: "true",
 			},

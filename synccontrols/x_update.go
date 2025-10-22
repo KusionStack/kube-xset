@@ -204,7 +204,7 @@ func (r *RealSyncControl) decideTargetToUpdateByPartition(xsetController api.XSe
 	}
 
 	// update all or not update any replicas
-	if partition == 0 {
+	if partition == 0 || len(filteredTargetInfos) < int(replicas-partition) {
 		return filteredTargetInfos
 	}
 	if partition >= replicas {
