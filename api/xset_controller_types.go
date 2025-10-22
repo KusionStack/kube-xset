@@ -40,6 +40,13 @@ type XSetController interface {
 	XSetOperation
 	// XOperation are implemented to access X object and status, etc.
 	XOperation
+
+	// Optional interfaces:
+	// 		- LifecycleAdapterGetter
+	// 		- ResourceContextAdapterGetter
+	// 		- LabelAnnotationManagerGetter
+	// 		- SubResourcePvcAdapter
+	// 		- DecorationAdapter
 }
 
 type XSetObject client.Object
