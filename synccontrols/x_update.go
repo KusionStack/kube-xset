@@ -204,7 +204,7 @@ func (r *RealSyncControl) decideTargetToUpdateByPartition(xsetController api.XSe
 	}
 
 	// update all or not update any replicas
-	if partition == 0 {
+	if partition == 0 || len(filteredTargetInfos) < int(replicas-partition) {
 		return filteredTargetInfos
 	}
 	if partition >= replicas {
@@ -216,7 +216,7 @@ func (r *RealSyncControl) decideTargetToUpdateByPartition(xsetController api.XSe
 	sort.Sort(ordered)
 	targetToUpdate := ordered.targets[:replicas-partition]
 	// separate decoration and xset update progress
-	for i := replicas - partition; i < int32Min(replicas, currentTargetCount); i++ {
+	for i := replicas - partition; i < min(replicas, currentTargetCount); i++ {
 		if ordered.targets[i].DecorationChanged {
 			ordered.targets[i].IsUpdatedRevision = true
 			ordered.targets[i].UpdateRevision = ordered.targets[i].CurrentRevision
@@ -654,12 +654,4 @@ func (u *GenericTargetUpdater) isTargetUpdatedServiceAvailable(targetInfo *Targe
 	}
 
 	return false, "target not service available", nil
-}
-
-func int32Min(l, r int32) int32 {
-	if l < r {
-		return l
-	}
-
-	return r
 }
