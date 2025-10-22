@@ -10,6 +10,11 @@ A Kubernetes utility package for managing various operations—such as scaling, 
 
   <img src="docs/wx_spark.jpg" width="200" height="200"/>
 
+## Usage
+```shell
+go get kusionstack.io/kube-xset
+```
+
 ## 🎖︎ Contribution guide
 
 We welcome everyone to participate in construction with us. Visit the [Contribution Guide](docs/contributing.md)
