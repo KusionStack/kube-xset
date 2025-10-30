@@ -27,6 +27,7 @@ import (
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/apimachinery/pkg/util/sets"
 	"k8s.io/client-go/tools/record"
+	"k8s.io/utils/ptr"
 	clientutil "kusionstack.io/kube-utils/client"
 	"kusionstack.io/kube-utils/controller/expectations"
 	"kusionstack.io/kube-utils/controller/mixin"
@@ -160,7 +161,7 @@ func (r *RealResourceContextControl) CleanUnusedIDs(ctx context.Context, xsetObj
 			ownedIDs[detail.ID] = detail
 		}
 	}
-	needCleanCount = len(ownedIDs) - maxInt(int(*xsetSpec.Replicas), len(objs))
+	needCleanCount = len(ownedIDs) - maxInt(int(ptr.Deref(xsetSpec.Replicas, 0)), len(objs))
 
 	if needCleanCount <= 0 {
 		return nil

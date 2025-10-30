@@ -180,7 +180,7 @@ func (r *RealSyncControl) SyncTargets(ctx context.Context, instance api.XSetObje
 		syncContext.OwnedIds = ownedIDs
 		return err
 	}); err != nil {
-		return false, fmt.Errorf("fail to allocate %d IDs using context when sync Targets: %w", xspec.Replicas, err)
+		return false, fmt.Errorf("fail to allocate %d IDs using context when sync Targets: %w", ptr.Deref(xspec.Replicas, 0), err)
 	}
 
 	// stateless case
