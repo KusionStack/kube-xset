@@ -312,7 +312,7 @@ func (r *xSetCommonReconciler) ensureReclaimTargetsDeletion(ctx context.Context,
 			return false, r.syncControl.BatchDeleteTargetsByLabel(ctx, r.targetControl, targets)
 		}
 	}
-	return true, nil
+	return false, nil
 }
 
 // ensureReclaimOwnerReferences removes decoration ownerReference from filteredPods if xset is deleting.
