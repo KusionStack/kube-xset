@@ -17,6 +17,10 @@
 package features
 
 import (
+	"fmt"
+	"strings"
+
+	"github.com/spf13/pflag"
 	"k8s.io/component-base/featuregate"
 )
 
@@ -25,9 +29,36 @@ var (
 	// Only top-level commands/options setup and the k8s.io/component-base/featuregate/testing package should make use of this.
 	// Tests that need to modify feature gates for the duration of their test should use:
 	//   defer featuregatetesting.SetFeatureGateDuringTest(t, utilfeature.DefaultFeatureGate, features.<FeatureName>, <value>)()
-	DefaultMutableFeatureGate featuregate.MutableFeatureGate = featuregate.NewFeatureGate()
+	DefaultMutableFeatureGate featuregate.MutableFeatureGate = NewXSetFeatureGate()
 
 	// DefaultFeatureGate is a shared global FeatureGate.
 	// Top-level commands/options setup that needs to modify this feature gate should use DefaultMutableFeatureGate.
 	DefaultFeatureGate featuregate.FeatureGate = DefaultMutableFeatureGate
 )
+
+var flagName = "xset-feature-gates"
+
+type xsetFeatureGate struct {
+	featuregate.MutableFeatureGate
+}
+
+func NewXSetFeatureGate() featuregate.MutableFeatureGate {
+	return &xsetFeatureGate{
+		MutableFeatureGate: featuregate.NewFeatureGate(),
+	}
+}
+
+func (g *xsetFeatureGate) AddFlags(fs *pflag.FlagSet) {
+	known := g.KnownFeatures()
+	fs.Var(g, flagName, ""+
+		"A set of key=value pairs that describe feature gates for alpha/experimental features. "+
+		"Options are:\n"+strings.Join(known, "\n"))
+}
+
+func (g *xsetFeatureGate) String() string {
+	return g.MutableFeatureGate.(fmt.Stringer).String()
+}
+
+func (g *xsetFeatureGate) Type() string {
+	return "mapStringBool"
+}
