@@ -35,6 +35,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
 	"kusionstack.io/kube-xset/api"
+	"kusionstack.io/kube-xset/features"
 	"kusionstack.io/kube-xset/opslifecycle"
 	"kusionstack.io/kube-xset/subresources"
 	"kusionstack.io/kube-xset/xcontrol"
@@ -240,6 +241,11 @@ func (r *RealSyncControl) includeTarget(ctx context.Context, xsetObject api.XSet
 
 // reclaimScaleStrategy updates targetToDelete, targetToExclude, targetToInclude in scaleStrategy
 func (r *RealSyncControl) reclaimScaleStrategy(ctx context.Context, deletedTargets, excludedTargets, includedTargets sets.String, xsetObject api.XSetObject) error {
+	// ReclaimScaleStrategy FeatureGate defaults to false
+	// Add '--feature-gates=ReclaimScaleStrategy=false' to container args, to disable reclaim of podToDelete, podToExclude, podToInclude
+	if !features.DefaultFeatureGate.Enabled(features.ReclaimScaleStrategy) {
+		return nil
+	}
 	xspec := r.xsetController.GetXSetSpec(xsetObject)
 	// reclaim TargetToDelete
 	toDeleteTargets := sets.NewString(xspec.ScaleStrategy.TargetToDelete...)
