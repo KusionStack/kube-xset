@@ -1,0 +1,64 @@
+/*
+ * Copyright 2024-2025 KusionStack Authors.
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ *     http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+
+package features
+
+import (
+	"fmt"
+	"strings"
+
+	"github.com/spf13/pflag"
+	"k8s.io/component-base/featuregate"
+)
+
+var (
+	// DefaultMutableFeatureGate is a mutable version of DefaultFeatureGate.
+	// Only top-level commands/options setup and the k8s.io/component-base/featuregate/testing package should make use of this.
+	// Tests that need to modify feature gates for the duration of their test should use:
+	//   defer featuregatetesting.SetFeatureGateDuringTest(t, utilfeature.DefaultFeatureGate, features.<FeatureName>, <value>)()
+	DefaultMutableFeatureGate featuregate.MutableFeatureGate = NewXSetFeatureGate()
+
+	// DefaultFeatureGate is a shared global FeatureGate.
+	// Top-level commands/options setup that needs to modify this feature gate should use DefaultMutableFeatureGate.
+	DefaultFeatureGate featuregate.FeatureGate = DefaultMutableFeatureGate
+)
+
+var flagName = "xset-feature-gates"
+
+type xsetFeatureGate struct {
+	featuregate.MutableFeatureGate
+}
+
+func NewXSetFeatureGate() featuregate.MutableFeatureGate {
+	return &xsetFeatureGate{
+		MutableFeatureGate: featuregate.NewFeatureGate(),
+	}
+}
+
+func (g *xsetFeatureGate) AddFlag(fs *pflag.FlagSet) {
+	known := g.KnownFeatures()
+	fs.Var(g, flagName, ""+
+		"A set of key=value pairs that describe feature gates for alpha/experimental features. "+
+		"Options are:\n"+strings.Join(known, "\n"))
+}
+
+func (g *xsetFeatureGate) String() string {
+	return g.MutableFeatureGate.(fmt.Stringer).String()
+}
+
+func (g *xsetFeatureGate) Type() string {
+	return "mapStringBool"
+}
