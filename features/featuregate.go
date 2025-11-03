@@ -48,7 +48,7 @@ func NewXSetFeatureGate() featuregate.MutableFeatureGate {
 	}
 }
 
-func (g *xsetFeatureGate) AddFlags(fs *pflag.FlagSet) {
+func (g *xsetFeatureGate) AddFlag(fs *pflag.FlagSet) {
 	known := g.KnownFeatures()
 	fs.Var(g, flagName, ""+
 		"A set of key=value pairs that describe feature gates for alpha/experimental features. "+
