@@ -193,7 +193,7 @@ func (r *RealSyncControl) excludeTarget(ctx context.Context, xsetObject api.XSet
 	}
 
 	r.xsetLabelAnnoMgr.Set(target, api.XOrphanedIndicationLabelKey, "true")
-	if err := r.xControl.OrphanTarget(xsetObject, target); err != nil {
+	if err := r.xControl.OrphanTarget(ctx, xsetObject, target); err != nil {
 		return err
 	}
 	return r.cacheExpectations.ExpectUpdation(clientutil.ObjectKeyString(xsetObject), r.targetGVK, target.GetNamespace(), target.GetName(), target.GetResourceVersion())
@@ -233,7 +233,7 @@ func (r *RealSyncControl) includeTarget(ctx context.Context, xsetObject api.XSet
 
 	r.xsetLabelAnnoMgr.Set(target, api.XInstanceIdLabelKey, instanceId)
 	r.xsetLabelAnnoMgr.Delete(target.GetLabels(), api.XOrphanedIndicationLabelKey)
-	if err := r.xControl.AdoptTarget(xsetObject, target); err != nil {
+	if err := r.xControl.AdoptTarget(ctx, xsetObject, target); err != nil {
 		return err
 	}
 	return r.cacheExpectations.ExpectUpdation(clientutil.ObjectKeyString(xsetObject), r.targetGVK, target.GetNamespace(), target.GetName(), target.GetResourceVersion())

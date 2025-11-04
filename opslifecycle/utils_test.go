@@ -108,7 +108,7 @@ func TestLifecycle(t *testing.T) {
 			setOperationType(mgr, b, target)
 		}
 
-		_, err := Begin(mgr, c, a, target)
+		_, err := Begin(context.TODO(), mgr, c, a, target)
 		g.Expect(reflect.DeepEqual(err, input.err)).Should(gomega.BeTrue())
 		if err != nil {
 			continue
@@ -116,12 +116,12 @@ func TestLifecycle(t *testing.T) {
 		g.Expect(target.Labels[mockLabelKey]).Should(gomega.BeEquivalentTo(mockLabelValue))
 
 		setOperate(mgr, a, target)
-		started, err := Begin(mgr, c, a, target)
+		started, err := Begin(context.TODO(), mgr, c, a, target)
 		g.Expect(err).ShouldNot(gomega.HaveOccurred())
 		g.Expect(started).Should(gomega.BeTrue())
 		g.Expect(IsDuringOps(mgr, a, target)).Should(gomega.BeTrue())
 
-		finished, err := Finish(mgr, c, a, target)
+		finished, err := Finish(context.TODO(), mgr, c, a, target)
 		g.Expect(err).ShouldNot(gomega.HaveOccurred())
 		g.Expect(finished).Should(gomega.BeTrue())
 		g.Expect(target.Labels[mockLabelKey]).Should(gomega.BeEquivalentTo(""))
