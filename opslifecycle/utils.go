@@ -108,7 +108,7 @@ func IsDuringOps(m api.XSetLabelAnnotationManager, adapter api.LifecycleAdapter,
 }
 
 // Begin is used for an CRD Operator to begin a lifecycle
-func Begin(m api.XSetLabelAnnotationManager, c client.Client, adapter api.LifecycleAdapter, obj client.Object, updateFuncs ...UpdateFunc) (updated bool, err error) {
+func Begin(ctx context.Context, m api.XSetLabelAnnotationManager, c client.Client, adapter api.LifecycleAdapter, obj client.Object, updateFuncs ...UpdateFunc) (updated bool, err error) {
 	if obj.GetLabels() == nil {
 		obj.SetLabels(map[string]string{})
 	}
@@ -147,7 +147,7 @@ func Begin(m api.XSetLabelAnnotationManager, c client.Client, adapter api.Lifecy
 	}
 
 	if needUpdate || updated {
-		err = c.Update(context.Background(), obj)
+		err = c.Update(ctx, obj)
 		return err == nil, err
 	}
 
@@ -155,15 +155,15 @@ func Begin(m api.XSetLabelAnnotationManager, c client.Client, adapter api.Lifecy
 }
 
 // BeginWithCleaningOld is used for an CRD Operator to begin a lifecycle with cleaning the old lifecycle
-func BeginWithCleaningOld(m api.XSetLabelAnnotationManager, c client.Client, adapter api.LifecycleAdapter, obj client.Object, updateFunc ...UpdateFunc) (updated bool, err error) {
+func BeginWithCleaningOld(ctx context.Context, m api.XSetLabelAnnotationManager, c client.Client, adapter api.LifecycleAdapter, obj client.Object, updateFunc ...UpdateFunc) (updated bool, err error) {
 	if targetInUpdateLifecycle, err := IsLifecycleOnTarget(m, adapter.GetID(), obj); err != nil {
 		return false, fmt.Errorf("fail to check %s TargetOpsLifecycle on Target %s/%s: %w", adapter.GetID(), obj.GetNamespace(), obj.GetName(), err)
 	} else if targetInUpdateLifecycle {
-		if err := Undo(m, c, adapter, obj); err != nil {
+		if err := Undo(ctx, m, c, adapter, obj); err != nil {
 			return false, err
 		}
 	}
-	return Begin(m, c, adapter, obj, updateFunc...)
+	return Begin(ctx, m, c, adapter, obj, updateFunc...)
 }
 
 // AllowOps is used to check whether the TargetOpsLifecycle phase is in UPGRADE to do following operations.
@@ -194,7 +194,7 @@ func AllowOps(m api.XSetLabelAnnotationManager, adapter api.LifecycleAdapter, op
 }
 
 // Finish is used for an CRD Operator to finish a lifecycle
-func Finish(m api.XSetLabelAnnotationManager, c client.Client, adapter api.LifecycleAdapter, obj client.Object, updateFuncs ...UpdateFunc) (updated bool, err error) {
+func Finish(ctx context.Context, m api.XSetLabelAnnotationManager, c client.Client, adapter api.LifecycleAdapter, obj client.Object, updateFuncs ...UpdateFunc) (updated bool, err error) {
 	operatingID, hasID := checkOperatingID(m, adapter, obj)
 	operationType, hasType := checkOperationType(m, adapter, obj)
 
@@ -213,7 +213,7 @@ func Finish(m api.XSetLabelAnnotationManager, c client.Client, adapter api.Lifec
 		return
 	}
 	if needUpdate || updated {
-		err = c.Update(context.Background(), obj)
+		err = c.Update(ctx, obj)
 		return err == nil, err
 	}
 
@@ -221,9 +221,9 @@ func Finish(m api.XSetLabelAnnotationManager, c client.Client, adapter api.Lifec
 }
 
 // Undo is used for an CRD Operator to undo a lifecycle
-func Undo(m api.XSetLabelAnnotationManager, c client.Client, adapter api.LifecycleAdapter, obj client.Object) error {
+func Undo(ctx context.Context, m api.XSetLabelAnnotationManager, c client.Client, adapter api.LifecycleAdapter, obj client.Object) error {
 	setUndo(m, adapter, obj)
-	return c.Update(context.Background(), obj)
+	return c.Update(ctx, obj)
 }
 
 func checkOperatingID(m api.XSetLabelAnnotationManager, adapter api.LifecycleAdapter, obj client.Object) (val string, ok bool) {
@@ -305,7 +305,7 @@ func IsLifecycleOnTarget(m api.XSetLabelAnnotationManager, operatingID string, t
 	return false, nil
 }
 
-func CancelOpsLifecycle(m api.XSetLabelAnnotationManager, client client.Client, adapter api.LifecycleAdapter, target client.Object) error {
+func CancelOpsLifecycle(ctx context.Context, m api.XSetLabelAnnotationManager, client client.Client, adapter api.LifecycleAdapter, target client.Object) error {
 	if target == nil {
 		return nil
 	}
@@ -317,7 +317,7 @@ func CancelOpsLifecycle(m api.XSetLabelAnnotationManager, client client.Client, 
 		return nil
 	}
 
-	return Undo(m, client, adapter, target)
+	return Undo(ctx, m, client, adapter, target)
 }
 
 func DefaultUpdateAll(target client.Object, updateFuncs ...UpdateFunc) (updated bool, err error) {

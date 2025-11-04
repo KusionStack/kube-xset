@@ -44,8 +44,8 @@ type TargetControl interface {
 	DeleteTarget(ctx context.Context, target client.Object) error
 	UpdateTarget(ctx context.Context, target client.Object) error
 	PatchTarget(ctx context.Context, target client.Object, patch client.Patch) error
-	OrphanTarget(xset api.XSetObject, target client.Object) error
-	AdoptTarget(xset api.XSetObject, target client.Object) error
+	OrphanTarget(ctx context.Context, xset api.XSetObject, target client.Object) error
+	AdoptTarget(ctx context.Context, xset api.XSetObject, target client.Object) error
 }
 
 type targetControl struct {
@@ -97,13 +97,13 @@ func (r *targetControl) GetFilteredTargets(ctx context.Context, selector *metav1
 		return nil, nil, fmt.Errorf("target list items is invalid")
 	}
 
-	allTargets, err := r.getTargets(items, selector, owner)
+	allTargets, err := r.getTargets(ctx, items, selector, owner)
 	if err != nil {
 		return nil, nil, err
 	}
 
 	items = filterOutInactiveTargets(r.xsetController, items)
-	filteredTargets, err := r.getTargets(items, selector, owner)
+	filteredTargets, err := r.getTargets(ctx, items, selector, owner)
 
 	return filteredTargets, allTargets, err
 }
@@ -127,7 +127,7 @@ func (r *targetControl) PatchTarget(ctx context.Context, target client.Object, p
 	return r.client.Patch(ctx, target, patch)
 }
 
-func (r *targetControl) OrphanTarget(xset api.XSetObject, target client.Object) error {
+func (r *targetControl) OrphanTarget(ctx context.Context, xset api.XSetObject, target client.Object) error {
 	spec := r.xsetController.GetXSetSpec(xset)
 	if spec.Selector.MatchLabels == nil {
 		return nil
@@ -141,14 +141,14 @@ func (r *targetControl) OrphanTarget(xset api.XSetObject, target client.Object) 
 	}
 
 	refWriter := refmanagerutil.NewOwnerRefWriter(r.client)
-	if err := refWriter.Release(context.TODO(), xset, target); err != nil {
+	if err := refWriter.Release(ctx, xset, target); err != nil {
 		return fmt.Errorf("failed to orphan target: %s", err.Error())
 	}
 
 	return nil
 }
 
-func (r *targetControl) AdoptTarget(xset api.XSetObject, target client.Object) error {
+func (r *targetControl) AdoptTarget(ctx context.Context, xset api.XSetObject, target client.Object) error {
 	spec := r.xsetController.GetXSetSpec(xset)
 	if spec.Selector.MatchLabels == nil {
 		return nil
@@ -161,14 +161,14 @@ func (r *targetControl) AdoptTarget(xset api.XSetObject, target client.Object) e
 	}
 	refManager := refmanagerutil.NewObjectControllerRefManager(refWriter, xset, xset.GetObjectKind().GroupVersionKind(), matcher)
 
-	if _, err = refManager.Claim(context.TODO(), target); err != nil {
+	if _, err = refManager.Claim(ctx, target); err != nil {
 		return fmt.Errorf("failed to adopt target: %s", err.Error())
 	}
 
 	return nil
 }
 
-func (r *targetControl) getTargets(candidates []client.Object, selector *metav1.LabelSelector, xset api.XSetObject) ([]client.Object, error) {
+func (r *targetControl) getTargets(ctx context.Context, candidates []client.Object, selector *metav1.LabelSelector, xset api.XSetObject) ([]client.Object, error) {
 	// Use RefManager to adopt/orphan as needed.
 	writer := refmanagerutil.NewOwnerRefWriter(r.client)
 	matcher, err := refmanagerutil.LabelSelectorAsMatch(selector)
@@ -180,7 +180,7 @@ func (r *targetControl) getTargets(candidates []client.Object, selector *metav1.
 	var claimObjs []client.Object
 	var errList []error
 	for _, obj := range candidates {
-		ok, err := refManager.Claim(context.TODO(), obj)
+		ok, err := refManager.Claim(ctx, obj)
 		if err != nil {
 			errList = append(errList, err)
 			continue

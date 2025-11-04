@@ -625,7 +625,7 @@ func (r *RealSyncControl) Scale(ctx context.Context, xsetObject api.XSetObject, 
 
 			// trigger TargetOpsLifecycle with scaleIn OperationType
 			logger.V(1).Info("try to begin TargetOpsLifecycle for scaling in Target in XSet", "wrapper", ObjectKeyString(object))
-			if updated, err := opslifecycle.Begin(r.updateConfig.XsetLabelAnnoMgr, r.Client, r.scaleInLifecycleAdapter, object); err != nil {
+			if updated, err := opslifecycle.Begin(ctx, r.updateConfig.XsetLabelAnnoMgr, r.Client, r.scaleInLifecycleAdapter, object); err != nil {
 				return fmt.Errorf("fail to begin TargetOpsLifecycle for Scaling in Target %s/%s: %w", object.GetNamespace(), object.GetName(), err)
 			} else if updated {
 				wrapper.IsDuringScaleInOps = true
