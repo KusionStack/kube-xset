@@ -43,7 +43,7 @@ func TestAllowResourceExclude(t *testing.T) {
 				},
 			},
 			allow:  false,
-			reason: "object's label is empty",
+			reason: "object is not controlled by kusionstack system",
 		},
 		{
 			name: "KusionStack control label not satisfied",
@@ -158,7 +158,7 @@ func TestAllowResourceInclude(t *testing.T) {
 				},
 			},
 			allow:  false,
-			reason: "object's label is empty",
+			reason: "object is not controlled by kusionstack system",
 		},
 		{
 			name: "KusionStack control label not satisfied",
