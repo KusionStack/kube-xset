@@ -82,7 +82,7 @@ type ResourceContextAdapterGetter interface {
 
 // LabelAnnotationManagerGetter is used to get label manager adapter.
 type LabelAnnotationManagerGetter interface {
-	GetLabelManagerAdapter() XSetLabelAnnotationManager
+	GetLabelManagerAdapter() map[XSetLabelAnnotationEnum]string
 }
 
 // SubResourcePvcAdapter is used to manage pvc subresource for X, which are declared on XSet, e.g., spec.volumeClaimTemplate.

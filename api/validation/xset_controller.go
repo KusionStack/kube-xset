@@ -55,9 +55,9 @@ func validateFinalizerName(name string) error {
 func validateXSetLabelAnnotationManager(xSetController api.XSetController) error {
 	var manager api.XSetLabelAnnotationManager
 	if getter, ok := xSetController.(api.LabelAnnotationManagerGetter); ok {
-		manager = getter.GetLabelManagerAdapter()
+		manager = api.NewXSetLabelAnnotationManager(getter.GetLabelManagerAdapter())
 	} else {
-		manager = api.NewXSetLabelAnnotationManager()
+		manager = api.NewXSetLabelAnnotationManager(nil)
 	}
 	if manager == nil {
 		return nil

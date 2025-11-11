@@ -129,21 +129,24 @@ var defaultXSetLabelAnnotationManager = map[XSetLabelAnnotationEnum]string{
 	SubResourcePvcTemplateHashLabelKey: appsv1alpha1.PvcTemplateHashLabelKey,
 }
 
-func NewXSetLabelAnnotationManager() XSetLabelAnnotationManager {
+func NewXSetLabelAnnotationManager(m map[XSetLabelAnnotationEnum]string) XSetLabelAnnotationManager {
+	if m == nil {
+		m = defaultXSetLabelAnnotationManager
+	}
 	return &xSetLabelAnnotationManager{
-		labelManager: defaultXSetLabelAnnotationManager,
+		labelMap: m,
 	}
 }
 
 type xSetLabelAnnotationManager struct {
-	labelManager map[XSetLabelAnnotationEnum]string
+	labelMap map[XSetLabelAnnotationEnum]string
 }
 
 func (m *xSetLabelAnnotationManager) Get(obj client.Object, key XSetLabelAnnotationEnum) (string, bool) {
 	if obj == nil || obj.GetLabels() == nil {
 		return "", false
 	}
-	labelKey := m.labelManager[key]
+	labelKey := m.labelMap[key]
 	val, exist := obj.GetLabels()[labelKey]
 	return val, exist
 }
@@ -156,7 +159,7 @@ func (m *xSetLabelAnnotationManager) Set(obj client.Object, key XSetLabelAnnotat
 	if labels == nil {
 		labels = map[string]string{}
 	}
-	labelKey := m.labelManager[key]
+	labelKey := m.labelMap[key]
 	labels[labelKey] = val
 	obj.SetLabels(labels)
 }
@@ -169,13 +172,13 @@ func (m *xSetLabelAnnotationManager) Delete(obj client.Object, key XSetLabelAnno
 	if labels == nil {
 		return
 	}
-	labelKey := m.labelManager[key]
+	labelKey := m.labelMap[key]
 	delete(labels, labelKey)
 	obj.SetLabels(labels)
 }
 
 func (m *xSetLabelAnnotationManager) Value(key XSetLabelAnnotationEnum) string {
-	return m.labelManager[key]
+	return m.labelMap[key]
 }
 
 func GetWellKnownLabelPrefixesWithID(m XSetLabelAnnotationManager) []string {
@@ -189,7 +192,7 @@ func GetWellKnownLabelPrefixesWithID(m XSetLabelAnnotationManager) []string {
 
 func GetXSetLabelAnnotationManager(xsetController XSetController) XSetLabelAnnotationManager {
 	if getter, ok := xsetController.(LabelAnnotationManagerGetter); ok {
-		return getter.GetLabelManagerAdapter()
+		return NewXSetLabelAnnotationManager(getter.GetLabelManagerAdapter())
 	}
-	return NewXSetLabelAnnotationManager()
+	return NewXSetLabelAnnotationManager(nil)
 }
