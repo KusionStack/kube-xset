@@ -99,9 +99,9 @@ const (
 )
 
 type XSetLabelAnnotationManager interface {
-	Get(labels map[string]string, labelType XSetLabelAnnotationEnum) (string, bool)
+	Get(obj client.Object, labelType XSetLabelAnnotationEnum) (string, bool)
 	Set(obj client.Object, labelType XSetLabelAnnotationEnum, value string)
-	Delete(labels map[string]string, labelType XSetLabelAnnotationEnum)
+	Delete(obj client.Object, labelType XSetLabelAnnotationEnum)
 	Value(labelType XSetLabelAnnotationEnum) string
 }
 
@@ -139,29 +139,39 @@ type xSetLabelAnnotationManager struct {
 	labelManager map[XSetLabelAnnotationEnum]string
 }
 
-func (m *xSetLabelAnnotationManager) Get(labels map[string]string, key XSetLabelAnnotationEnum) (string, bool) {
-	if labels == nil {
+func (m *xSetLabelAnnotationManager) Get(obj client.Object, key XSetLabelAnnotationEnum) (string, bool) {
+	if obj == nil || obj.GetLabels() == nil {
 		return "", false
 	}
 	labelKey := m.labelManager[key]
-	val, exist := labels[labelKey]
+	val, exist := obj.GetLabels()[labelKey]
 	return val, exist
 }
 
 func (m *xSetLabelAnnotationManager) Set(obj client.Object, key XSetLabelAnnotationEnum, val string) {
-	if obj.GetLabels() == nil {
-		obj.SetLabels(map[string]string{})
+	if obj == nil {
+		return
+	}
+	labels := obj.GetLabels()
+	if labels == nil {
+		labels = map[string]string{}
 	}
 	labelKey := m.labelManager[key]
-	obj.GetLabels()[labelKey] = val
+	labels[labelKey] = val
+	obj.SetLabels(labels)
 }
 
-func (m *xSetLabelAnnotationManager) Delete(labels map[string]string, key XSetLabelAnnotationEnum) {
+func (m *xSetLabelAnnotationManager) Delete(obj client.Object, key XSetLabelAnnotationEnum) {
+	if obj == nil {
+		return
+	}
+	labels := obj.GetLabels()
 	if labels == nil {
 		return
 	}
 	labelKey := m.labelManager[key]
 	delete(labels, labelKey)
+	obj.SetLabels(labels)
 }
 
 func (m *xSetLabelAnnotationManager) Value(key XSetLabelAnnotationEnum) string {

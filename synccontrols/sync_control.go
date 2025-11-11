@@ -29,7 +29,6 @@ import (
 	appsv1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
-	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/apimachinery/pkg/util/sets"
@@ -217,7 +216,7 @@ func (r *RealSyncControl) SyncTargets(ctx context.Context, instance api.XSetObje
 				idToReclaim.Insert(id)
 			}
 
-			_, replaceIndicate := r.xsetLabelAnnoMgr.Get(target.GetLabels(), api.XReplaceIndicationLabelKey)
+			_, replaceIndicate := r.xsetLabelAnnoMgr.Get(target, api.XReplaceIndicationLabelKey)
 			// 2. filter out Targets which are terminating and not replace indicate
 			if !replaceIndicate {
 				continue
@@ -318,7 +317,7 @@ func (r *RealSyncControl) dealIncludeExcludeTargets(ctx context.Context, xsetObj
 
 	for _, target := range targets {
 		ownedTargets.Insert(target.GetName())
-		if _, exist := r.xsetLabelAnnoMgr.Get(target.GetLabels(), api.XExcludeIndicationLabelKey); exist {
+		if _, exist := r.xsetLabelAnnoMgr.Get(target, api.XExcludeIndicationLabelKey); exist {
 			excludeTargetNames.Insert(target.GetName())
 		}
 	}
@@ -350,17 +349,17 @@ func (r *RealSyncControl) dealIncludeExcludeTargets(ctx context.Context, xsetObj
 
 	toExcludeTargets, notAllowedExcludeTargets, exErr := r.allowIncludeExcludeTargets(ctx, xsetObject, excludeTargetNames.List(), AllowResourceExclude, r.xsetLabelAnnoMgr)
 	toIncludeTargets, notAllowedIncludeTargets, inErr := r.allowIncludeExcludeTargets(ctx, xsetObject, includeTargetNames.List(), AllowResourceInclude, r.xsetLabelAnnoMgr)
-	if notAllowedExcludeTargets.Len() > 0 {
+	if notAllowedExcludeTargets != nil && notAllowedExcludeTargets.Len() > 0 {
 		r.Recorder.Eventf(xsetObject, corev1.EventTypeWarning, "ExcludeNotAllowed", fmt.Sprintf("targets [%v] are not allowed to exclude, please find out the reason from target's event", notAllowedExcludeTargets.List()))
 	}
-	if notAllowedIncludeTargets.Len() > 0 {
+	if notAllowedIncludeTargets != nil && notAllowedIncludeTargets.Len() > 0 {
 		r.Recorder.Eventf(xsetObject, corev1.EventTypeWarning, "IncludeNotAllowed", fmt.Sprintf("targets [%v] are not allowed to include, please find out the reason from target's event", notAllowedIncludeTargets.List()))
 	}
 	return toExcludeTargets, toIncludeTargets, errors.Join(exErr, inErr)
 }
 
 // checkAllowFunc refers to AllowResourceExclude and AllowResourceInclude
-type checkAllowFunc func(obj metav1.Object, ownerName, ownerKind string, labelMgr api.XSetLabelAnnotationManager) (bool, string)
+type checkAllowFunc func(obj client.Object, ownerName, ownerKind string, labelMgr api.XSetLabelAnnotationManager) (bool, string)
 
 // allowIncludeExcludeTargets try to classify targetNames to allowedTargets and notAllowedTargets, using checkAllowFunc func
 func (r *RealSyncControl) allowIncludeExcludeTargets(ctx context.Context, xset api.XSetObject, targetNames []string, fn checkAllowFunc, labelMgr api.XSetLabelAnnotationManager) (allowTargets, notAllowTargets sets.String, err error) {
@@ -702,8 +701,8 @@ func (r *RealSyncControl) Scale(ctx context.Context, xsetObject api.XSetObject, 
 
 			// delete pvcs if target is in update replace, or retention policy is "Deleted"
 			if _, enabled := subresources.GetSubresourcePvcAdapter(r.xsetController); enabled {
-				_, replaceOrigin := r.xsetLabelAnnoMgr.Get(target.Object.GetLabels(), api.XReplacePairOriginName)
-				_, replaceNew := r.xsetLabelAnnoMgr.Get(target.Object.GetLabels(), api.XReplacePairNewId)
+				_, replaceOrigin := r.xsetLabelAnnoMgr.Get(target.Object, api.XReplacePairOriginName)
+				_, replaceNew := r.xsetLabelAnnoMgr.Get(target.Object, api.XReplacePairNewId)
 				if replaceOrigin || replaceNew || !r.pvcControl.RetainPvcWhenXSetScaled(xsetObject) {
 					return r.pvcControl.DeleteTargetPvcs(ctx, xsetObject, target.Object, syncContext.ExistingPvcs)
 				}
@@ -1045,13 +1044,9 @@ func FilterOutActiveTargetWrappers(targets []*TargetWrapper) []*TargetWrapper {
 }
 
 func targetDuringReplace(labelMgr api.XSetLabelAnnotationManager, target client.Object) bool {
-	labels := target.GetLabels()
-	if labels == nil {
-		return false
-	}
-	_, replaceIndicate := labelMgr.Get(labels, api.XReplaceIndicationLabelKey)
-	_, replaceOriginTarget := labelMgr.Get(labels, api.XReplacePairOriginName)
-	_, replaceNewTarget := labelMgr.Get(labels, api.XReplacePairNewId)
+	_, replaceIndicate := labelMgr.Get(target, api.XReplaceIndicationLabelKey)
+	_, replaceOriginTarget := labelMgr.Get(target, api.XReplacePairOriginName)
+	_, replaceNewTarget := labelMgr.Get(target, api.XReplacePairNewId)
 	return replaceIndicate || replaceOriginTarget || replaceNewTarget
 }
 
@@ -1059,7 +1054,7 @@ func targetDuringReplace(labelMgr api.XSetLabelAnnotationManager, target client.
 func (r *RealSyncControl) BatchDeleteTargetsByLabel(ctx context.Context, targetControl xcontrol.TargetControl, needDeleteTargets []client.Object) error {
 	_, err := controllerutils.SlowStartBatch(len(needDeleteTargets), controllerutils.SlowStartInitialBatchSize, false, func(i int, _ error) error {
 		target := needDeleteTargets[i]
-		if _, exist := r.xsetLabelAnnoMgr.Get(target.GetLabels(), api.XDeletionIndicationLabelKey); !exist {
+		if _, exist := r.xsetLabelAnnoMgr.Get(target, api.XDeletionIndicationLabelKey); !exist {
 			patch := client.RawPatch(types.MergePatchType, []byte(fmt.Sprintf(`{"metadata":{"labels":{"%s":"%d"}}}`, r.xsetLabelAnnoMgr.Value(api.XDeletionIndicationLabelKey), time.Now().UnixNano()))) // nolint
 			if err := targetControl.PatchTarget(ctx, target, patch); err != nil {
 				return fmt.Errorf("failed to delete target when syncTargets %s/%s/%w", target.GetNamespace(), target.GetName(), err)
