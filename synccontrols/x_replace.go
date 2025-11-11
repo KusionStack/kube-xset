@@ -82,7 +82,7 @@ func (r *RealSyncControl) cleanReplaceTargetLabels(
 				}
 			}
 			// replace canceled, (1) remove ReplaceNewTargetID, ReplaceOriginTargetID key from IDs, (2) try to delete new Target's ID
-			_, replaceIndicate := r.xsetLabelAnnoMgr.Get(target.GetLabels(), api.XReplaceIndicationLabelKey)
+			_, replaceIndicate := r.xsetLabelAnnoMgr.Get(target, api.XReplaceIndicationLabelKey)
 			if !replaceIndicate && labelKey == r.xsetLabelAnnoMgr.Value(api.XReplacePairNewId) {
 				needUpdateContext = true
 				originTargetId, _ := xcontrol.GetInstanceID(r.xsetLabelAnnoMgr, target)
@@ -229,9 +229,7 @@ func (r *RealSyncControl) dealReplaceTargets(ctx context.Context, targets []*Tar
 	filteredTargets := FilterOutActiveTargetWrappers(targets)
 
 	for _, target := range filteredTargets {
-		targetLabels := target.GetLabels()
-
-		if instanceId, ok := r.xsetLabelAnnoMgr.Get(targetLabels, api.XInstanceIdLabelKey); ok {
+		if instanceId, ok := r.xsetLabelAnnoMgr.Get(target, api.XInstanceIdLabelKey); ok {
 			targetInstanceIdMap[instanceId] = target
 		}
 		targetNameMap[target.GetName()] = target
@@ -239,10 +237,8 @@ func (r *RealSyncControl) dealReplaceTargets(ctx context.Context, targets []*Tar
 
 	// deal need replace targets
 	for _, target := range filteredTargets {
-		targetLabels := target.GetLabels()
-
 		// no replace indication label
-		if _, exist := r.xsetLabelAnnoMgr.Get(targetLabels, api.XReplaceIndicationLabelKey); !exist {
+		if _, exist := r.xsetLabelAnnoMgr.Get(target, api.XReplaceIndicationLabelKey); !exist {
 			continue
 		}
 
@@ -253,14 +249,14 @@ func (r *RealSyncControl) dealReplaceTargets(ctx context.Context, targets []*Tar
 		}
 
 		// target is replace new created target, skip replace
-		if originTargetName, exist := r.xsetLabelAnnoMgr.Get(targetLabels, api.XReplacePairOriginName); exist {
+		if originTargetName, exist := r.xsetLabelAnnoMgr.Get(target, api.XReplacePairOriginName); exist {
 			if _, exist := targetNameMap[originTargetName]; exist {
 				continue
 			}
 		}
 
 		// target already has a new created target for replacement
-		if newPairTargetId, exist := r.xsetLabelAnnoMgr.Get(targetLabels, api.XReplacePairNewId); exist {
+		if newPairTargetId, exist := r.xsetLabelAnnoMgr.Get(target, api.XReplacePairNewId); exist {
 			if _, exist := targetInstanceIdMap[newPairTargetId]; exist {
 				continue
 			}
@@ -271,16 +267,15 @@ func (r *RealSyncControl) dealReplaceTargets(ctx context.Context, targets []*Tar
 
 	for _, wrapper := range filteredTargets {
 		target := wrapper.Object
-		targetLabels := target.GetLabels()
-		_, replaceByUpdate := r.xsetLabelAnnoMgr.Get(targetLabels, api.XReplaceByReplaceUpdateLabelKey)
+		_, replaceByUpdate := r.xsetLabelAnnoMgr.Get(target, api.XReplaceByReplaceUpdateLabelKey)
 		var needCleanLabels []string
 
 		// target is replace new created target, skip replace
-		if originTargetName, exist := r.xsetLabelAnnoMgr.Get(targetLabels, api.XReplacePairOriginName); exist {
+		if originTargetName, exist := r.xsetLabelAnnoMgr.Get(target, api.XReplacePairOriginName); exist {
 			// replace pair origin target is not exist, clean label.
 			if originTarget, exist := targetNameMap[originTargetName]; !exist {
 				needCleanLabels = append(needCleanLabels, r.xsetLabelAnnoMgr.Value(api.XReplacePairOriginName))
-			} else if _, exist := r.xsetLabelAnnoMgr.Get(originTarget.GetLabels(), api.XReplaceIndicationLabelKey); !exist {
+			} else if _, exist := r.xsetLabelAnnoMgr.Get(originTarget.Object, api.XReplaceIndicationLabelKey); !exist {
 				// replace canceled, delete replace new target if new target is not service available
 				if !r.xsetController.CheckAvailable(target) {
 					needDeleteTargets = append(needDeleteTargets, target)
@@ -293,7 +288,7 @@ func (r *RealSyncControl) dealReplaceTargets(ctx context.Context, targets []*Tar
 			}
 		}
 
-		if newPairTargetId, exist := r.xsetLabelAnnoMgr.Get(targetLabels, api.XReplacePairNewId); exist {
+		if newPairTargetId, exist := r.xsetLabelAnnoMgr.Get(target, api.XReplacePairNewId); exist {
 			if _, exist := targetInstanceIdMap[newPairTargetId]; !exist {
 				needCleanLabels = append(needCleanLabels, r.xsetLabelAnnoMgr.Value(api.XReplacePairNewId))
 			}
@@ -319,7 +314,7 @@ func updateReplaceOriginTarget(
 	// 1. delete the new target if not updated
 	if newTargetUpdateInfo != nil {
 		newTarget := newTargetUpdateInfo.Object
-		_, deletionIndicate := xsetLabelAnnoMgr.Get(newTarget.GetLabels(), api.XDeletionIndicationLabelKey)
+		_, deletionIndicate := xsetLabelAnnoMgr.Get(newTarget, api.XDeletionIndicationLabelKey)
 		currentRevision, exist := newTarget.GetLabels()[appsv1.ControllerRevisionHashLabelKey]
 		if exist && currentRevision != originTargetUpdateInfo.UpdateRevision.GetName() && !deletionIndicate {
 			patch := client.RawPatch(types.MergePatchType, []byte(fmt.Sprintf(`{"metadata":{"labels":{%q:"%d"}}}`, xsetLabelAnnoMgr.Value(api.XDeletionIndicationLabelKey), time.Now().UnixNano())))
@@ -339,8 +334,8 @@ func updateReplaceOriginTarget(
 	}
 
 	// 2. replace the origin target with updated target
-	_, replaceIndicate := xsetLabelAnnoMgr.Get(originTarget.GetLabels(), api.XReplaceIndicationLabelKey)
-	replaceRevision, replaceByUpdate := xsetLabelAnnoMgr.Get(originTarget.GetLabels(), api.XReplaceByReplaceUpdateLabelKey)
+	_, replaceIndicate := xsetLabelAnnoMgr.Get(originTarget, api.XReplaceIndicationLabelKey)
+	replaceRevision, replaceByUpdate := xsetLabelAnnoMgr.Get(originTarget, api.XReplaceByReplaceUpdateLabelKey)
 	if !replaceIndicate || !replaceByUpdate || replaceRevision != originTargetUpdateInfo.UpdateRevision.Name {
 		now := time.Now().UnixNano()
 		patch := client.RawPatch(types.MergePatchType, []byte(fmt.Sprintf(`{"metadata":{"labels":{%q:"%v", %q: "%v"}}}`, xsetLabelAnnoMgr.Value(api.XReplaceIndicationLabelKey), now, xsetLabelAnnoMgr.Value(api.XReplaceByReplaceUpdateLabelKey), originTargetUpdateInfo.UpdateRevision.Name)))
@@ -362,7 +357,7 @@ func updateReplaceOriginTarget(
 // getReplaceRevision finds replaceNewTarget's revision from originTarget
 func (r *RealSyncControl) getReplaceRevision(originTarget client.Object, syncContext *SyncContext) *appsv1.ControllerRevision {
 	// replace update, first find revision from label, if revision not found, just replace with updated revision
-	if updateRevisionName, exist := r.xsetLabelAnnoMgr.Get(originTarget.GetLabels(), api.XReplaceByReplaceUpdateLabelKey); exist {
+	if updateRevisionName, exist := r.xsetLabelAnnoMgr.Get(originTarget, api.XReplaceByReplaceUpdateLabelKey); exist {
 		for _, rv := range syncContext.Revisions {
 			if updateRevisionName == rv.Name {
 				return rv
@@ -402,16 +397,16 @@ func classifyTargetReplacingMapping(xsetLabelAnnoMgr api.XSetLabelAnnotationMana
 			continue
 		}
 		name := targetWrapper.GetName()
-		if replacePairNewIdStr, exist := xsetLabelAnnoMgr.Get(targetWrapper.GetLabels(), api.XReplacePairNewId); exist {
+		if replacePairNewIdStr, exist := xsetLabelAnnoMgr.Get(targetWrapper.Object, api.XReplacePairNewId); exist {
 			if pairNewTarget, exist := targetIdMap[replacePairNewIdStr]; exist {
 				replaceTargetMapping[name] = pairNewTarget
 				// if one of pair targets is to Exclude, both targets should not scaleIn
 				targetWrapper.ToExclude = targetWrapper.ToExclude || pairNewTarget.ToExclude
 				continue
 			}
-		} else if replaceOriginStr, exist := xsetLabelAnnoMgr.Get(targetWrapper.GetLabels(), api.XReplacePairOriginName); exist {
+		} else if replaceOriginStr, exist := xsetLabelAnnoMgr.Get(targetWrapper.Object, api.XReplacePairOriginName); exist {
 			if originTarget, exist := targetNameMap[replaceOriginStr]; exist {
-				id, exist := xsetLabelAnnoMgr.Get(originTarget.GetLabels(), api.XReplacePairNewId)
+				id, exist := xsetLabelAnnoMgr.Get(originTarget.Object, api.XReplacePairNewId)
 				if exist && id == strconv.Itoa(targetWrapper.ID) {
 					continue
 				}

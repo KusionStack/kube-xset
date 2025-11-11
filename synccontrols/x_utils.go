@@ -118,7 +118,7 @@ func controlByXSet(xsetLabelAnnoMgr api.XSetLabelAnnotationManager, obj client.O
 	if obj.GetLabels() == nil {
 		obj.SetLabels(map[string]string{})
 	}
-	if v, ok := xsetLabelAnnoMgr.Get(obj.GetLabels(), api.ControlledByXSetLabel); !ok || v != "true" {
+	if v, ok := xsetLabelAnnoMgr.Get(obj, api.ControlledByXSetLabel); !ok || v != "true" {
 		xsetLabelAnnoMgr.Set(obj, api.ControlledByXSetLabel, "true")
 	}
 }
@@ -128,7 +128,7 @@ func IsControlledByXSet(xsetLabelManager api.XSetLabelAnnotationManager, obj cli
 		return false
 	}
 
-	v, ok := xsetLabelManager.Get(obj.GetLabels(), api.ControlledByXSetLabel)
+	v, ok := xsetLabelManager.Get(obj, api.ControlledByXSetLabel)
 	return ok && v == "true"
 }
 

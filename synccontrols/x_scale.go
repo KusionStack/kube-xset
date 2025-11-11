@@ -224,7 +224,7 @@ func (r *RealSyncControl) includeTarget(ctx context.Context, xsetObject api.XSet
 			}
 
 			r.xsetLabelAnnoMgr.Set(pvc, api.XInstanceIdLabelKey, instanceId)
-			r.xsetLabelAnnoMgr.Delete(pvc.GetLabels(), api.XOrphanedIndicationLabelKey)
+			r.xsetLabelAnnoMgr.Delete(pvc, api.XOrphanedIndicationLabelKey)
 			if err := r.pvcControl.AdoptPvc(ctx, xsetObject, pvc); err != nil {
 				return err
 			}
@@ -232,7 +232,7 @@ func (r *RealSyncControl) includeTarget(ctx context.Context, xsetObject api.XSet
 	}
 
 	r.xsetLabelAnnoMgr.Set(target, api.XInstanceIdLabelKey, instanceId)
-	r.xsetLabelAnnoMgr.Delete(target.GetLabels(), api.XOrphanedIndicationLabelKey)
+	r.xsetLabelAnnoMgr.Delete(target, api.XOrphanedIndicationLabelKey)
 	if err := r.xControl.AdoptTarget(ctx, xsetObject, target); err != nil {
 		return err
 	}

@@ -109,7 +109,7 @@ func (pc *RealPvcControl) GetFilteredPvcs(ctx context.Context, xset api.XSetObje
 }
 
 func (pc *RealPvcControl) CreateTargetPvcs(ctx context.Context, xset api.XSetObject, x client.Object, existingPvcs []*corev1.PersistentVolumeClaim) error {
-	id, exist := pc.xsetLabelAnnoMgr.Get(x.GetLabels(), api.XInstanceIdLabelKey)
+	id, exist := pc.xsetLabelAnnoMgr.Get(x, api.XInstanceIdLabelKey)
 	if !exist {
 		return nil
 	}
@@ -192,8 +192,8 @@ func (pc *RealPvcControl) DeleteTargetPvcs(ctx context.Context, xset api.XSetObj
 		}
 
 		// only delete pvcs used by target
-		pvcId, _ := pc.xsetLabelAnnoMgr.Get(pvc.Labels, api.XInstanceIdLabelKey)
-		targetId, _ := pc.xsetLabelAnnoMgr.Get(x.GetLabels(), api.XInstanceIdLabelKey)
+		pvcId, _ := pc.xsetLabelAnnoMgr.Get(pvc, api.XInstanceIdLabelKey)
+		targetId, _ := pc.xsetLabelAnnoMgr.Get(x, api.XInstanceIdLabelKey)
 		if pvcId != targetId {
 			continue
 		}
@@ -206,10 +206,7 @@ func (pc *RealPvcControl) DeleteTargetPvcs(ctx context.Context, xset api.XSetObj
 }
 
 func (pc *RealPvcControl) DeleteTargetUnusedPvcs(ctx context.Context, xset api.XSetObject, x client.Object, existingPvcs []*corev1.PersistentVolumeClaim) error {
-	if x.GetLabels() == nil {
-		return nil
-	}
-	id, exist := pc.xsetLabelAnnoMgr.Get(x.GetLabels(), api.XInstanceIdLabelKey)
+	id, exist := pc.xsetLabelAnnoMgr.Get(x, api.XInstanceIdLabelKey)
 	if !exist {
 		return nil
 	}
@@ -342,12 +339,12 @@ func (pc *RealPvcControl) IsTargetPvcTmpChanged(xset api.XSetObject, x client.Ob
 		if pvc.Labels == nil || x.GetLabels() == nil {
 			continue
 		}
-		pvcId, _ := pc.xsetLabelAnnoMgr.Get(pvc.Labels, api.XInstanceIdLabelKey)
-		targetId, _ := pc.xsetLabelAnnoMgr.Get(x.GetLabels(), api.XInstanceIdLabelKey)
+		pvcId, _ := pc.xsetLabelAnnoMgr.Get(pvc, api.XInstanceIdLabelKey)
+		targetId, _ := pc.xsetLabelAnnoMgr.Get(x, api.XInstanceIdLabelKey)
 		if pvcId != targetId {
 			continue
 		}
-		if _, exist := pc.xsetLabelAnnoMgr.Get(pvc.Labels, api.SubResourcePvcTemplateHashLabelKey); !exist {
+		if _, exist := pc.xsetLabelAnnoMgr.Get(pvc, api.SubResourcePvcTemplateHashLabelKey); !exist {
 			continue
 		}
 		existingPvcHash[pvc.Name] = pvc.Labels[appsv1alpha1.PvcTemplateHashLabelKey]
@@ -461,16 +458,16 @@ func (pc *RealPvcControl) classifyTargetPvcs(id string, xset api.XSetObject, exi
 			continue
 		}
 
-		if val, exist := pc.xsetLabelAnnoMgr.Get(pvc.Labels, api.XInstanceIdLabelKey); !exist {
+		if val, exist := pc.xsetLabelAnnoMgr.Get(pvc, api.XInstanceIdLabelKey); !exist {
 			continue
 		} else if val != id {
 			continue
 		}
 
-		if _, exist := pc.xsetLabelAnnoMgr.Get(pvc.Labels, api.SubResourcePvcTemplateHashLabelKey); !exist {
+		if _, exist := pc.xsetLabelAnnoMgr.Get(pvc, api.SubResourcePvcTemplateHashLabelKey); !exist {
 			continue
 		}
-		hash, _ := pc.xsetLabelAnnoMgr.Get(pvc.Labels, api.SubResourcePvcTemplateHashLabelKey)
+		hash, _ := pc.xsetLabelAnnoMgr.Get(pvc, api.SubResourcePvcTemplateHashLabelKey)
 		pvcTmpName, err := pc.extractPvcTmpName(xset, pvc)
 		if err != nil {
 			return nil, nil, err
@@ -488,7 +485,7 @@ func (pc *RealPvcControl) classifyTargetPvcs(id string, xset api.XSetObject, exi
 }
 
 func (pc *RealPvcControl) extractPvcTmpName(xset api.XSetObject, pvc *corev1.PersistentVolumeClaim) (string, error) {
-	if pvcTmpName, exist := pc.xsetLabelAnnoMgr.Get(pvc.Labels, api.SubResourcePvcTemplateLabelKey); exist {
+	if pvcTmpName, exist := pc.xsetLabelAnnoMgr.Get(pvc, api.SubResourcePvcTemplateLabelKey); exist {
 		return pvcTmpName, nil
 	}
 	lastDashIndex := strings.LastIndex(pvc.Name, "-")

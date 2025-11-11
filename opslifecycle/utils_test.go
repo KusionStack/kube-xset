@@ -55,7 +55,7 @@ func TestLifecycle(t *testing.T) {
 
 	a := &mockAdapter{id: "id-1", operationType: "type-1"}
 	b := &mockAdapter{id: "id-2", operationType: "type-1"}
-	mgr := api.NewXSetLabelAnnotationManager()
+	mgr := api.NewXSetLabelAnnotationManager(nil)
 
 	inputs := []struct {
 		hasOperating, hasConflictID bool
