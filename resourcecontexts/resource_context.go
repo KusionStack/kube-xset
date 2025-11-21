@@ -96,7 +96,7 @@ func (r *RealResourceContextControl) AllocateID(
 	targetContext := r.resourceContextAdapter.NewResourceContext()
 	notFound := false
 	if err := r.Client.Get(ctx, types.NamespacedName{Namespace: xsetObject.GetNamespace(), Name: contextName}, targetContext); err != nil {
-		if !errors.IsNotFound(err) {
+		if !apiservererrors.IsNotFound(err) {
 			return nil, fmt.Errorf("fail to find ResourceContext %s/%s for owner %s: %s", xsetObject.GetNamespace(), contextName, xsetObject.GetName(), err.Error())
 		}
 
@@ -144,7 +144,7 @@ func (r *RealResourceContextControl) CleanUnusedIDs(ctx context.Context, xsetObj
 	contextName := getContextName(r.xsetController, xsetObject)
 	targetContext := r.resourceContextAdapter.NewResourceContext()
 	if err := r.Client.Get(ctx, types.NamespacedName{Namespace: xsetObject.GetNamespace(), Name: contextName}, targetContext); err != nil {
-		if !errors.IsNotFound(err) {
+		if !apiservererrors.IsNotFound(err) {
 			return fmt.Errorf("fail to find ResourceContext %s/%s for owner %s: %s", xsetObject.GetNamespace(), contextName, xsetObject.GetName(), err.Error())
 		}
 		return nil
@@ -209,7 +209,7 @@ func (r *RealResourceContextControl) UpdateToTargetContext(
 	contextName := getContextName(r.xsetController, xSetObject)
 	targetContext := r.resourceContextAdapter.NewResourceContext()
 	if err := r.Client.Get(ctx, types.NamespacedName{Namespace: xSetObject.GetNamespace(), Name: contextName}, targetContext); err != nil {
-		if !errors.IsNotFound(err) {
+		if !apiservererrors.IsNotFound(err) {
 			return fmt.Errorf("fail to find ResourceContext %s/%s: %w", xSetObject.GetNamespace(), contextName, err)
 		}
 
