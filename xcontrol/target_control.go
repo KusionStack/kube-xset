@@ -110,7 +110,7 @@ func (r *targetControl) GetFilteredTargets(ctx context.Context, selector *metav1
 
 func (r *targetControl) CreateTarget(ctx context.Context, target client.Object) (client.Object, error) {
 	if err := r.client.Create(ctx, target); err != nil {
-		return nil, fmt.Errorf("failed to create target: %s", err.Error())
+		return nil, fmt.Errorf("failed to create target: %w", err)
 	}
 	return target, nil
 }
@@ -142,7 +142,7 @@ func (r *targetControl) OrphanTarget(ctx context.Context, xset api.XSetObject, t
 
 	refWriter := refmanagerutil.NewOwnerRefWriter(r.client)
 	if err := refWriter.Release(ctx, xset, target); err != nil {
-		return fmt.Errorf("failed to orphan target: %s", err.Error())
+		return fmt.Errorf("failed to orphan target: %w", err)
 	}
 
 	return nil
@@ -157,12 +157,12 @@ func (r *targetControl) AdoptTarget(ctx context.Context, xset api.XSetObject, ta
 	refWriter := refmanagerutil.NewOwnerRefWriter(r.client)
 	matcher, err := refmanagerutil.LabelSelectorAsMatch(spec.Selector)
 	if err != nil {
-		return fmt.Errorf("fail to create labelSelector matcher: %s", err.Error())
+		return fmt.Errorf("fail to create labelSelector matcher: %w", err)
 	}
 	refManager := refmanagerutil.NewObjectControllerRefManager(refWriter, xset, xset.GetObjectKind().GroupVersionKind(), matcher)
 
 	if _, err = refManager.Claim(ctx, target); err != nil {
-		return fmt.Errorf("failed to adopt target: %s", err.Error())
+		return fmt.Errorf("failed to adopt target: %w", err)
 	}
 
 	return nil
@@ -173,7 +173,7 @@ func (r *targetControl) getTargets(ctx context.Context, candidates []client.Obje
 	writer := refmanagerutil.NewOwnerRefWriter(r.client)
 	matcher, err := refmanagerutil.LabelSelectorAsMatch(selector)
 	if err != nil {
-		return nil, fmt.Errorf("fail to create labelSelector matcher: %s", err.Error())
+		return nil, fmt.Errorf("fail to create labelSelector matcher: %w", err)
 	}
 	refManager := refmanagerutil.NewObjectControllerRefManager(writer, xset, xset.GetObjectKind().GroupVersionKind(), matcher)
 
@@ -201,7 +201,7 @@ func setUpCache(cache cache.Cache, controller api.XSetController) error {
 		}
 		return []string{string(ownerRef.UID)}
 	}); err != nil {
-		return fmt.Errorf("failed to index by field for x->xset %s: %s", FieldIndexOwnerRefUID, err.Error())
+		return fmt.Errorf("failed to index by field for x->xset %s: %w", FieldIndexOwnerRefUID, err)
 	}
 	return nil
 }

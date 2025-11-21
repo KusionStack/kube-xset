@@ -97,7 +97,7 @@ func (r *RealResourceContextControl) AllocateID(
 	notFound := false
 	if err := r.Client.Get(ctx, types.NamespacedName{Namespace: xsetObject.GetNamespace(), Name: contextName}, targetContext); err != nil {
 		if !apiservererrors.IsNotFound(err) {
-			return nil, fmt.Errorf("fail to find ResourceContext %s/%s for owner %s: %s", xsetObject.GetNamespace(), contextName, xsetObject.GetName(), err.Error())
+			return nil, fmt.Errorf("fail to find ResourceContext %s/%s for owner %s: %w", xsetObject.GetNamespace(), contextName, xsetObject.GetName(), err)
 		}
 
 		notFound = true
@@ -131,7 +131,7 @@ func (r *RealResourceContextControl) AllocateID(
 	}
 
 	// find new IDs for owner
-	ownedIDs = r.fulfillOwnedIDs(ownedIDs, existingIDs, unRecordedIDs, replicas, xsetObject.GetName(), defaultRevision)
+	ownedIDs = r.fulfillOwnedIDs(ownedIDs, existingIDs, unRecordedIDs, replicas, xsetObject, defaultRevision)
 
 	if notFound {
 		return ownedIDs, r.doCreateTargetContext(ctx, xsetObject, ownedIDs)
@@ -145,7 +145,7 @@ func (r *RealResourceContextControl) CleanUnusedIDs(ctx context.Context, xsetObj
 	targetContext := r.resourceContextAdapter.NewResourceContext()
 	if err := r.Client.Get(ctx, types.NamespacedName{Namespace: xsetObject.GetNamespace(), Name: contextName}, targetContext); err != nil {
 		if !apiservererrors.IsNotFound(err) {
-			return fmt.Errorf("fail to find ResourceContext %s/%s for owner %s: %s", xsetObject.GetNamespace(), contextName, xsetObject.GetName(), err.Error())
+			return fmt.Errorf("fail to find ResourceContext %s/%s for owner %s: %w", xsetObject.GetNamespace(), contextName, xsetObject.GetName(), err)
 		}
 		return nil
 	}
@@ -387,13 +387,13 @@ func (r *RealResourceContextControl) getUnRecordTargetIDs(existingIDs map[int]*a
 }
 
 // fulfillOwnedIDs fulfill ids for ownedIDs in order to meet replicas
-func (r *RealResourceContextControl) fulfillOwnedIDs(ownedIDs, existingIDs map[int]*api.ContextDetail, unRecordIDs map[int]string, replicas int, ownerName, defaultRevision string) map[int]*api.ContextDetail {
+func (r *RealResourceContextControl) fulfillOwnedIDs(ownedIDs, existingIDs map[int]*api.ContextDetail, unRecordIDs map[int]string, replicas int, owner api.XSetObject, defaultRevision string) map[int]*api.ContextDetail {
 	// first use ids from current unrecorded targets
 	for id, revision := range unRecordIDs {
 		detail := &api.ContextDetail{
 			ID: id,
 			Data: map[string]string{
-				r.resourceContextKeys[api.EnumOwnerContextKey]:          ownerName,
+				r.resourceContextKeys[api.EnumOwnerContextKey]:          owner.GetName(),
 				r.resourceContextKeys[api.EnumRevisionContextDataKey]:   revision,
 				r.resourceContextKeys[api.EnumJustCreateContextDataKey]: "true",
 			},
@@ -419,7 +419,7 @@ func (r *RealResourceContextControl) fulfillOwnedIDs(ownedIDs, existingIDs map[i
 			ID: fulfilledIDs[i],
 			// TODO choose just create target' revision according to scaleStrategy
 			Data: map[string]string{
-				r.resourceContextKeys[api.EnumOwnerContextKey]:          ownerName,
+				r.resourceContextKeys[api.EnumOwnerContextKey]:          owner.GetName(),
 				r.resourceContextKeys[api.EnumRevisionContextDataKey]:   defaultRevision,
 				r.resourceContextKeys[api.EnumJustCreateContextDataKey]: "true",
 			},

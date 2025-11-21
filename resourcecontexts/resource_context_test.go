@@ -20,8 +20,10 @@ import (
 	"reflect"
 	"testing"
 
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/client-go/tools/record"
+	appsv1alpha1 "kusionstack.io/kube-api/apps/v1alpha1"
 	"kusionstack.io/kube-utils/controller/expectations"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
@@ -44,7 +46,7 @@ func TestRealResourceContextControl_fulfillOwnedIDs(t *testing.T) {
 		existingIDs     map[int]*api.ContextDetail
 		unRecordIDs     map[int]string
 		replicas        int
-		ownerName       string
+		owner           api.XSetObject
 		defaultRevision string
 	}
 	tests := []struct {
@@ -70,7 +72,7 @@ func TestRealResourceContextControl_fulfillOwnedIDs(t *testing.T) {
 				},
 				unRecordIDs:     map[int]string{},
 				replicas:        5,
-				ownerName:       "foo",
+				owner:           &appsv1alpha1.CollaSet{ObjectMeta: metav1.ObjectMeta{Name: "foo"}},
 				defaultRevision: "defaultRv",
 			},
 			fields: fields{
@@ -131,7 +133,7 @@ func TestRealResourceContextControl_fulfillOwnedIDs(t *testing.T) {
 				},
 				unRecordIDs:     map[int]string{3: "defaultRv"},
 				replicas:        2,
-				ownerName:       "foo",
+				owner:           &appsv1alpha1.CollaSet{ObjectMeta: metav1.ObjectMeta{Name: "foo"}},
 				defaultRevision: "defaultRv",
 			},
 			fields: fields{
@@ -184,7 +186,7 @@ func TestRealResourceContextControl_fulfillOwnedIDs(t *testing.T) {
 				},
 				unRecordIDs:     map[int]string{3: "defaultRv"},
 				replicas:        4,
-				ownerName:       "foo",
+				owner:           &appsv1alpha1.CollaSet{ObjectMeta: metav1.ObjectMeta{Name: "foo"}},
 				defaultRevision: "defaultRv",
 			},
 			fields: fields{
@@ -229,7 +231,7 @@ func TestRealResourceContextControl_fulfillOwnedIDs(t *testing.T) {
 				cacheExpectations:      tt.fields.cacheExpectations,
 				xsetLabelManager:       tt.fields.xsetLabelManager,
 			}
-			if got := r.fulfillOwnedIDs(tt.args.ownedIDs, tt.args.existingIDs, tt.args.unRecordIDs, tt.args.replicas, tt.args.ownerName, tt.args.defaultRevision); !reflect.DeepEqual(got, tt.want) {
+			if got := r.fulfillOwnedIDs(tt.args.ownedIDs, tt.args.existingIDs, tt.args.unRecordIDs, tt.args.replicas, tt.args.owner, tt.args.defaultRevision); !reflect.DeepEqual(got, tt.want) {
 				t.Errorf("fulfillOwnedIDs() = %v, want %v", got, tt.want)
 			}
 		})

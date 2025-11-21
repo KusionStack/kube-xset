@@ -26,7 +26,6 @@ import (
 	"time"
 
 	"github.com/go-logr/logr"
-	appsv1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/runtime/schema"
@@ -165,7 +164,7 @@ func (r *RealSyncControl) SyncTargets(ctx context.Context, instance api.XSetObje
 	// sync include exclude targets
 	toExcludeTargetNames, toIncludeTargetNames, err := r.dealIncludeExcludeTargets(ctx, instance, syncContext.FilteredTarget)
 	if err != nil {
-		return false, fmt.Errorf("fail to deal with include exclude targets: %s", err.Error())
+		return false, fmt.Errorf("fail to deal with include exclude targets: %w", err)
 	}
 
 	if err := r.resourceContextControl.CleanUnusedIDs(ctx, instance, syncContext.FilteredTarget); err != nil {
@@ -1063,24 +1062,4 @@ func (r *RealSyncControl) BatchDeleteTargetsByLabel(ctx context.Context, targetC
 		return nil
 	})
 	return err
-}
-
-// decideContextRevisionAfterCreate decides revision for 3 target create types: (1) just create, (2) upgrade by recreate, (3) delete and recreate
-func (r *RealSyncControl) decideContextRevisionAfterCreate(contextDetail *api.ContextDetail, updatedRevision *appsv1.ControllerRevision, createSucceeded bool) bool {
-	needUpdateContext := false
-	if !createSucceeded {
-		// if target is just create or upgrade by recreate, change revisionKey to updatedRevision
-		if r.resourceContextControl.Contains(contextDetail, api.EnumJustCreateContextDataKey, "true") ||
-			r.resourceContextControl.Contains(contextDetail, api.EnumRecreateUpdateContextDataKey, "true") {
-			r.resourceContextControl.Put(contextDetail, api.EnumRevisionContextDataKey, updatedRevision.GetName())
-			r.resourceContextControl.Remove(contextDetail, api.EnumTargetDecorationRevisionKey)
-			needUpdateContext = true
-		}
-		// if target is delete and recreate, never change revisionKey
-	} else {
-		r.resourceContextControl.Remove(contextDetail, api.EnumJustCreateContextDataKey)
-		r.resourceContextControl.Remove(contextDetail, api.EnumRecreateUpdateContextDataKey)
-		needUpdateContext = true
-	}
-	return needUpdateContext
 }
