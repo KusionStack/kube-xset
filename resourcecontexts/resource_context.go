@@ -21,6 +21,7 @@ import (
 	"fmt"
 	"sort"
 
+	appsv1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/runtime/schema"
@@ -121,7 +122,7 @@ func (r *RealResourceContextControl) AllocateID(
 	}
 
 	// get unrecorded model ids
-	unRecordedIDs := r.getUnRecordTargetIDs(ownedIDs, objs)
+	unRecordedIDs := r.getUnRecordTargetIDs(existingIDs, objs, defaultRevision)
 
 	// if owner has enough ID, return
 	if len(ownedIDs) >= replicas && len(unRecordedIDs) == 0 {
@@ -337,8 +338,8 @@ func (r *RealResourceContextControl) doUpdateTargetContext(
 }
 
 // getUnRecordTargetIDs get ids which are used by targets but not recorded in ResourceContext
-func (r *RealResourceContextControl) getUnRecordTargetIDs(ownedIDs map[int]*api.ContextDetail, objs []client.Object) []int {
-	var unRecordIDs []int
+func (r *RealResourceContextControl) getUnRecordTargetIDs(existingIDs map[int]*api.ContextDetail, objs []client.Object, defaultRevision string) map[int]string {
+	unRecordIDs := make(map[int]string)
 	for i := range objs {
 		if objs[i].GetDeletionTimestamp() != nil {
 			continue
@@ -348,8 +349,8 @@ func (r *RealResourceContextControl) getUnRecordTargetIDs(ownedIDs map[int]*api.
 			continue
 		}
 		if id, err := xcontrol.GetInstanceID(r.xsetLabelManager, objs[i]); err == nil {
-			if _, exist := ownedIDs[id]; !exist {
-				unRecordIDs = append(unRecordIDs, id)
+			if _, exist := existingIDs[id]; !exist {
+				unRecordIDs[id] = getTargetRevision(objs[i], defaultRevision)
 			}
 		}
 	}
@@ -357,12 +358,22 @@ func (r *RealResourceContextControl) getUnRecordTargetIDs(ownedIDs map[int]*api.
 }
 
 // fulfillOwnedIDs fulfill ids for ownedIDs in order to meet replicas
-func (r *RealResourceContextControl) fulfillOwnedIDs(ownedIDs, existingIDs map[int]*api.ContextDetail, unRecordIDs []int, replicas int, ownerName, defaultRevision string) map[int]*api.ContextDetail {
-	var fulfilledIDs []int
-	// first use ids from current targets
-	fulfilledIDs = append(fulfilledIDs, unRecordIDs...)
+func (r *RealResourceContextControl) fulfillOwnedIDs(ownedIDs, existingIDs map[int]*api.ContextDetail, unRecordIDs map[int]string, replicas int, ownerName, defaultRevision string) map[int]*api.ContextDetail {
+	// first use ids from current unrecorded targets
+	for id, revision := range unRecordIDs {
+		detail := &api.ContextDetail{
+			ID: id,
+			Data: map[string]string{
+				r.resourceContextKeys[api.EnumOwnerContextKey]:          ownerName,
+				r.resourceContextKeys[api.EnumRevisionContextDataKey]:   revision,
+				r.resourceContextKeys[api.EnumJustCreateContextDataKey]: "true",
+			},
+		}
+		ownedIDs[id] = detail
+	}
 
 	// use new ids from 0 inorder
+	var fulfilledIDs []int
 	for id := 0; ; id++ {
 		if len(fulfilledIDs) >= replicas-len(ownedIDs) {
 			break
@@ -396,6 +407,16 @@ func getContextName(xsetControl api.XSetController, instance api.XSetObject) str
 	}
 
 	return instance.GetName()
+}
+
+func getTargetRevision(target client.Object, defaultRevision string) string {
+	if target.GetLabels() == nil {
+		return defaultRevision
+	}
+	if rv, exist := target.GetLabels()[appsv1.ControllerRevisionHashLabelKey]; exist {
+		return rv
+	}
+	return defaultRevision
 }
 
 type ContextDetailsByOrder []api.ContextDetail

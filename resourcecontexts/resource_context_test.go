@@ -42,7 +42,7 @@ func TestRealResourceContextControl_fulfillOwnedIDs(t *testing.T) {
 	type args struct {
 		ownedIDs        map[int]*api.ContextDetail
 		existingIDs     map[int]*api.ContextDetail
-		unRecordIDs     []int
+		unRecordIDs     map[int]string
 		replicas        int
 		ownerName       string
 		defaultRevision string
@@ -68,7 +68,7 @@ func TestRealResourceContextControl_fulfillOwnedIDs(t *testing.T) {
 						Data: map[string]string{"Owner": "foo", "Revision": "defaultRv", "TargetJustCreate": "true"},
 					},
 				},
-				unRecordIDs:     []int{},
+				unRecordIDs:     map[int]string{},
 				replicas:        5,
 				ownerName:       "foo",
 				defaultRevision: "defaultRv",
@@ -129,7 +129,7 @@ func TestRealResourceContextControl_fulfillOwnedIDs(t *testing.T) {
 						Data: map[string]string{"Owner": "foo", "Revision": "defaultRv", "TargetJustCreate": "true"},
 					},
 				},
-				unRecordIDs:     []int{3},
+				unRecordIDs:     map[int]string{3: "defaultRv"},
 				replicas:        2,
 				ownerName:       "foo",
 				defaultRevision: "defaultRv",
@@ -182,7 +182,7 @@ func TestRealResourceContextControl_fulfillOwnedIDs(t *testing.T) {
 						Data: map[string]string{"Owner": "foo", "Revision": "defaultRv", "TargetJustCreate": "true"},
 					},
 				},
-				unRecordIDs:     []int{3},
+				unRecordIDs:     map[int]string{3: "defaultRv"},
 				replicas:        4,
 				ownerName:       "foo",
 				defaultRevision: "defaultRv",
