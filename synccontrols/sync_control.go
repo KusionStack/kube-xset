@@ -522,7 +522,7 @@ func (r *RealSyncControl) Scale(ctx context.Context, xsetObject api.XSetObject, 
 			succCount, err := controllerutils.SlowStartBatch(len(availableContexts), controllerutils.SlowStartInitialBatchSize, false, func(i int, _ error) (err error) {
 				availableIDContext := availableContexts[i]
 				defer func() {
-					if r.decideContextRevision(availableIDContext, syncContext.UpdatedRevision, err == nil) {
+					if r.resourceContextControl.DecideContextRevisionAfterCreate(availableIDContext, syncContext.UpdatedRevision, err == nil) {
 						needUpdateContext.Store(true)
 					}
 				}()
@@ -1065,23 +1065,19 @@ func (r *RealSyncControl) BatchDeleteTargetsByLabel(ctx context.Context, targetC
 	return err
 }
 
-// decideContextRevision decides revision for 3 target create types: (1) just create, (2) upgrade by recreate, (3) delete and recreate
-func (r *RealSyncControl) decideContextRevision(contextDetail *api.ContextDetail, updatedRevision *appsv1.ControllerRevision, createSucceeded bool) bool {
+// decideContextRevisionAfterCreate decides revision for 3 target create types: (1) just create, (2) upgrade by recreate, (3) delete and recreate
+func (r *RealSyncControl) decideContextRevisionAfterCreate(contextDetail *api.ContextDetail, updatedRevision *appsv1.ControllerRevision, createSucceeded bool) bool {
 	needUpdateContext := false
 	if !createSucceeded {
-		if r.resourceContextControl.Contains(contextDetail, api.EnumJustCreateContextDataKey, "true") {
-			// TODO choose just create targets' revision according to scaleStrategy
-			r.resourceContextControl.Put(contextDetail, api.EnumRevisionContextDataKey, updatedRevision.GetName())
-			r.resourceContextControl.Remove(contextDetail, api.EnumTargetDecorationRevisionKey)
-			needUpdateContext = true
-		} else if r.resourceContextControl.Contains(contextDetail, api.EnumRecreateUpdateContextDataKey, "true") {
+		// if target is just create or upgrade by recreate, change revisionKey to updatedRevision
+		if r.resourceContextControl.Contains(contextDetail, api.EnumJustCreateContextDataKey, "true") ||
+			r.resourceContextControl.Contains(contextDetail, api.EnumRecreateUpdateContextDataKey, "true") {
 			r.resourceContextControl.Put(contextDetail, api.EnumRevisionContextDataKey, updatedRevision.GetName())
 			r.resourceContextControl.Remove(contextDetail, api.EnumTargetDecorationRevisionKey)
 			needUpdateContext = true
 		}
 		// if target is delete and recreate, never change revisionKey
 	} else {
-		// TODO delete ID if create succeeded
 		r.resourceContextControl.Remove(contextDetail, api.EnumJustCreateContextDataKey)
 		r.resourceContextControl.Remove(contextDetail, api.EnumRecreateUpdateContextDataKey)
 		needUpdateContext = true

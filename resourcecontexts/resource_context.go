@@ -43,6 +43,7 @@ type ResourceContextControl interface {
 	CleanUnusedIDs(ctx context.Context, xsetObject api.XSetObject, objs []client.Object) error
 	UpdateToTargetContext(ctx context.Context, xsetObject api.XSetObject, ownedIDs map[int]*api.ContextDetail) error
 	ExtractAvailableContexts(diff int, ownedIDs map[int]*api.ContextDetail, targetInstanceIDSet sets.Int) []*api.ContextDetail
+	DecideContextRevisionAfterCreate(contextDetail *api.ContextDetail, updatedRevision *appsv1.ControllerRevision, createSuccess bool) bool
 	Get(detail *api.ContextDetail, enum api.ResourceContextKeyEnum) (string, bool)
 	Contains(detail *api.ContextDetail, enum api.ResourceContextKeyEnum, value string) bool
 	Put(detail *api.ContextDetail, enum api.ResourceContextKeyEnum, value string)
@@ -244,6 +245,26 @@ func (r *RealResourceContextControl) ExtractAvailableContexts(diff int, ownedIDs
 	}
 
 	return availableContexts
+}
+
+// DecideContextRevisionAfterCreate decides revision for 3 target create types: (1) just create, (2) upgrade by recreate, (3) delete and recreate
+func (r *RealResourceContextControl) DecideContextRevisionAfterCreate(contextDetail *api.ContextDetail, updatedRevision *appsv1.ControllerRevision, createSuccess bool) bool {
+	needUpdateContext := false
+	if !createSuccess {
+		// if target is just create or upgrade by recreate, change revisionKey to updatedRevision
+		if r.Contains(contextDetail, api.EnumJustCreateContextDataKey, "true") ||
+			r.Contains(contextDetail, api.EnumRecreateUpdateContextDataKey, "true") {
+			r.Put(contextDetail, api.EnumRevisionContextDataKey, updatedRevision.GetName())
+			r.Remove(contextDetail, api.EnumTargetDecorationRevisionKey)
+			needUpdateContext = true
+		}
+		// if target is delete and recreate, never change revisionKey
+	} else {
+		r.Remove(contextDetail, api.EnumJustCreateContextDataKey)
+		r.Remove(contextDetail, api.EnumRecreateUpdateContextDataKey)
+		needUpdateContext = true
+	}
+	return needUpdateContext
 }
 
 func (r *RealResourceContextControl) Get(detail *api.ContextDetail, enum api.ResourceContextKeyEnum) (string, bool) {
