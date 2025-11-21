@@ -272,7 +272,7 @@ func (r *RealResourceContextControl) DecideContextRevisionAfterCreate(contextDet
 // An unrecoverable error can only be recovered by updating the revision
 func UnrecoverableCreateError(createErr error) bool {
 	return apiservererrors.IsForbidden(createErr) ||
-		apiservererrors.IsAlreadyExists(createErr)
+		apiservererrors.IsInvalid(createErr)
 }
 
 func (r *RealResourceContextControl) Get(detail *api.ContextDetail, enum api.ResourceContextKeyEnum) (string, bool) {
