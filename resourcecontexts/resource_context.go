@@ -23,7 +23,7 @@ import (
 
 	appsv1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
-	"k8s.io/apimachinery/pkg/api/errors"
+	apiservererrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/apimachinery/pkg/util/sets"
@@ -43,7 +43,7 @@ type ResourceContextControl interface {
 	CleanUnusedIDs(ctx context.Context, xsetObject api.XSetObject, objs []client.Object) error
 	UpdateToTargetContext(ctx context.Context, xsetObject api.XSetObject, ownedIDs map[int]*api.ContextDetail) error
 	ExtractAvailableContexts(diff int, ownedIDs map[int]*api.ContextDetail, targetInstanceIDSet sets.Int) []*api.ContextDetail
-	DecideContextRevisionAfterCreate(contextDetail *api.ContextDetail, updatedRevision *appsv1.ControllerRevision, createSuccess bool) bool
+	DecideContextRevisionAfterCreate(contextDetail *api.ContextDetail, updatedRevision *appsv1.ControllerRevision, createErr error) bool
 	Get(detail *api.ContextDetail, enum api.ResourceContextKeyEnum) (string, bool)
 	Contains(detail *api.ContextDetail, enum api.ResourceContextKeyEnum, value string) bool
 	Put(detail *api.ContextDetail, enum api.ResourceContextKeyEnum, value string)
@@ -248,9 +248,9 @@ func (r *RealResourceContextControl) ExtractAvailableContexts(diff int, ownedIDs
 }
 
 // DecideContextRevisionAfterCreate decides revision for 3 target create types: (1) just create, (2) upgrade by recreate, (3) delete and recreate
-func (r *RealResourceContextControl) DecideContextRevisionAfterCreate(contextDetail *api.ContextDetail, updatedRevision *appsv1.ControllerRevision, createSuccess bool) bool {
+func (r *RealResourceContextControl) DecideContextRevisionAfterCreate(contextDetail *api.ContextDetail, updatedRevision *appsv1.ControllerRevision, createErr error) bool {
 	needUpdateContext := false
-	if !createSuccess {
+	if UnrecoverableCreateError(createErr) {
 		// if target is just create or upgrade by recreate, change revisionKey to updatedRevision
 		if r.Contains(contextDetail, api.EnumJustCreateContextDataKey, "true") ||
 			r.Contains(contextDetail, api.EnumRecreateUpdateContextDataKey, "true") {
@@ -265,6 +265,14 @@ func (r *RealResourceContextControl) DecideContextRevisionAfterCreate(contextDet
 		needUpdateContext = true
 	}
 	return needUpdateContext
+}
+
+// UnrecoverableCreateError checks a creation error is uncoverable or not
+// A recoverable error can be recovered by retrying create, such as 409/429
+// An unrecoverable error can only be recovered by updating the revision
+func UnrecoverableCreateError(createErr error) bool {
+	return apiservererrors.IsForbidden(createErr) ||
+		apiservererrors.IsAlreadyExists(createErr)
 }
 
 func (r *RealResourceContextControl) Get(detail *api.ContextDetail, enum api.ResourceContextKeyEnum) (string, bool) {

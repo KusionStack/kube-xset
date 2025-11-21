@@ -522,7 +522,7 @@ func (r *RealSyncControl) Scale(ctx context.Context, xsetObject api.XSetObject, 
 			succCount, err := controllerutils.SlowStartBatch(len(availableContexts), controllerutils.SlowStartInitialBatchSize, false, func(i int, _ error) (err error) {
 				availableIDContext := availableContexts[i]
 				defer func() {
-					if r.resourceContextControl.DecideContextRevisionAfterCreate(availableIDContext, syncContext.UpdatedRevision, err == nil) {
+					if r.resourceContextControl.DecideContextRevisionAfterCreate(availableIDContext, syncContext.UpdatedRevision, err) {
 						needUpdateContext.Store(true)
 					}
 				}()
