@@ -31,6 +31,7 @@ import (
 	"k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/apimachinery/pkg/util/sets"
+	"k8s.io/apimachinery/pkg/util/validation/field"
 	"k8s.io/client-go/util/retry"
 	"k8s.io/utils/ptr"
 	clientutil "kusionstack.io/kube-utils/client"
@@ -568,7 +569,7 @@ func (r *RealSyncControl) Scale(ctx context.Context, xsetObject api.XSetObject, 
 					r.xsetController.GetXSetTemplatePatcher(xsetObject),
 				)
 				if err != nil {
-					return fmt.Errorf("fail to new Target from revision %s: %w", revision.GetName(), err)
+					return apierrors.NewInvalid(schema.GroupKind{Group: r.targetGVK.Group, Kind: r.targetGVK.Kind}, target.GetGenerateName(), []*field.Error{{Detail: err.Error()}})
 				}
 				// create pvcs for targets (pod)
 				if _, enabled := subresources.GetSubresourcePvcAdapter(r.xsetController); enabled {
