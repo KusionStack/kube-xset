@@ -310,7 +310,7 @@ func (r *RealResourceContextControl) DecideContextsRevisionBeforeCreate(
 		if _, exist := r.Get(ownedIDs[i], api.EnumReplaceOriginTargetIDContextDataKey); exist {
 			continue
 		}
-		if r.Contains(ownedIDs[i], api.EnumRevisionContextDataKey, updatedRevision) {
+		if r.Contains(ownedIDs[i], api.EnumRevisionContextDataKey, currentRevision) {
 			currentRevisionReplicas++
 		}
 	}
