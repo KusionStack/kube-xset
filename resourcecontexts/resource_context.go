@@ -275,9 +275,12 @@ func UnrecoverableCreateError(createErr error) bool {
 }
 
 // DecideContextsRevisionBeforeCreate decides revision for newIDs contexts before create
-//  1. if owner update strategy is byLabel, use defaultRevision for all contexts
-//  2. if owner update strategy is byPartition, decide revisions by partition and
-//     revisions in inCluster contexts
+//  0. if owner update strategy is nil, use updatedRevision for all contexts
+//  1. if owner update strategy is byLabel, use currentRevision for all contexts
+//  2. if owner update strategy is byPartition, decide revisions by partition
+//     2.1 if partition is nil, use updatedRevision for all contexts
+//     2.2 if partition is not nil, assign the larger ((replicas-partition)-updatedReplicas) IDs
+//     to updatedRevision, while the remaining smaller sequence numbers use currentRevision.
 func (r *RealResourceContextControl) DecideContextsRevisionBeforeCreate(
 	ownedIDs, newIDs map[int]*api.ContextDetail,
 	spec *api.XSetSpec,
@@ -316,12 +319,22 @@ func (r *RealResourceContextControl) DecideContextsRevisionBeforeCreate(
 			updatedReplicas++
 		}
 	}
-	for i := range newIDs {
-		if i < int(replicas-partition)-updatedReplicas {
-			r.Put(newIDs[i], api.EnumRevisionContextDataKey, updatedRevision)
-		} else {
-			r.Put(newIDs[i], api.EnumRevisionContextDataKey, currentRevision)
+
+	// assign the larger ((replicas-partition)-updatedReplicas) IDs to updatedRevision,
+	// while the remaining smaller sequence numbers use currentRevision.
+	var ids []int
+	var addUpdatedReplicas int
+	for id := range newIDs {
+		ids = append(ids, id)
+	}
+	for i := len(ids) - 1; i >= 0; i-- {
+		id := ids[i]
+		if addUpdatedReplicas < int(replicas-partition)-updatedReplicas {
+			r.Put(newIDs[id], api.EnumRevisionContextDataKey, updatedRevision)
+			addUpdatedReplicas++
+			continue
 		}
+		r.Put(newIDs[id], api.EnumRevisionContextDataKey, currentRevision)
 	}
 }
 
