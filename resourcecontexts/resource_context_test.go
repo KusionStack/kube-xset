@@ -40,14 +40,14 @@ func TestRealResourceContextControl_fulfillOwnedIDs(t *testing.T) {
 		xsetLabelManager       api.XSetLabelAnnotationManager
 	}
 	type args struct {
-		ownedIDs              map[int]*api.ContextDetail
-		existingIDs           map[int]*api.ContextDetail
-		unRecordIDs           map[int]string
-		replicas              int
-		ownerName             string
-		rollingUpdateStrategy *api.RollingUpdateStrategy
-		currentRevision       string
-		updatedRevision       string
+		ownedIDs        map[int]*api.ContextDetail
+		existingIDs     map[int]*api.ContextDetail
+		unRecordIDs     map[int]string
+		replicas        int
+		ownerName       string
+		spec            *api.XSetSpec
+		currentRevision string
+		updatedRevision string
 	}
 	tests := []struct {
 		name   string
@@ -70,12 +70,12 @@ func TestRealResourceContextControl_fulfillOwnedIDs(t *testing.T) {
 						Data: map[string]string{"Owner": "foo", "Revision": "defaultRv", "TargetJustCreate": "true"},
 					},
 				},
-				unRecordIDs:           map[int]string{},
-				ownerName:             "foo",
-				rollingUpdateStrategy: nil,
-				replicas:              5,
-				currentRevision:       "defaultRv",
-				updatedRevision:       "defaultRv",
+				unRecordIDs:     map[int]string{},
+				ownerName:       "foo",
+				spec:            &api.XSetSpec{},
+				replicas:        5,
+				currentRevision: "defaultRv",
+				updatedRevision: "defaultRv",
 			},
 			fields: fields{
 				Client:                 nil,
@@ -133,12 +133,12 @@ func TestRealResourceContextControl_fulfillOwnedIDs(t *testing.T) {
 						Data: map[string]string{"Owner": "foo", "Revision": "defaultRv", "TargetJustCreate": "true"},
 					},
 				},
-				unRecordIDs:           map[int]string{3: "defaultRv"},
-				replicas:              2,
-				ownerName:             "foo",
-				rollingUpdateStrategy: nil,
-				currentRevision:       "defaultRv",
-				updatedRevision:       "defaultRv",
+				unRecordIDs:     map[int]string{3: "defaultRv"},
+				replicas:        2,
+				ownerName:       "foo",
+				spec:            &api.XSetSpec{},
+				currentRevision: "defaultRv",
+				updatedRevision: "defaultRv",
 			},
 			fields: fields{
 				Client:                 nil,
@@ -188,12 +188,12 @@ func TestRealResourceContextControl_fulfillOwnedIDs(t *testing.T) {
 						Data: map[string]string{"Owner": "foo", "Revision": "defaultRv", "TargetJustCreate": "true"},
 					},
 				},
-				unRecordIDs:           map[int]string{3: "defaultRv"},
-				replicas:              4,
-				ownerName:             "foo",
-				rollingUpdateStrategy: nil,
-				currentRevision:       "defaultRv",
-				updatedRevision:       "defaultRv",
+				unRecordIDs:     map[int]string{3: "defaultRv"},
+				replicas:        4,
+				ownerName:       "foo",
+				spec:            &api.XSetSpec{},
+				currentRevision: "defaultRv",
+				updatedRevision: "defaultRv",
 			},
 			fields: fields{
 				Client:                 nil,
@@ -237,7 +237,7 @@ func TestRealResourceContextControl_fulfillOwnedIDs(t *testing.T) {
 				cacheExpectations:      tt.fields.cacheExpectations,
 				xsetLabelManager:       tt.fields.xsetLabelManager,
 			}
-			if got := r.doAllocateID(tt.args.ownedIDs, tt.args.existingIDs, tt.args.unRecordIDs, tt.args.replicas, tt.args.ownerName, tt.args.rollingUpdateStrategy, tt.args.currentRevision, tt.args.updatedRevision); !reflect.DeepEqual(got, tt.want) {
+			if got := r.doAllocateID(tt.args.ownedIDs, tt.args.existingIDs, tt.args.unRecordIDs, tt.args.replicas, tt.args.ownerName, tt.args.spec, tt.args.currentRevision, tt.args.updatedRevision); !reflect.DeepEqual(got, tt.want) {
 				t.Errorf("ownedIDs() = %v, want %v", got, tt.want)
 			}
 		})

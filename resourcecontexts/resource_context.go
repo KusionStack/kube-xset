@@ -130,7 +130,7 @@ func (r *RealResourceContextControl) AllocateID(
 		return ownedIDs, nil
 	}
 
-	ownedIDs = r.doAllocateID(ownedIDs, existingIDs, unRecordedIDs, replicas, xsetObject.GetName(), xsetSpec.UpdateStrategy.RollingUpdate, currentRevision, updatedRevision)
+	ownedIDs = r.doAllocateID(ownedIDs, existingIDs, unRecordedIDs, replicas, xsetObject.GetName(), xsetSpec, currentRevision, updatedRevision)
 
 	if notFound {
 		return ownedIDs, r.doCreateTargetContext(ctx, xsetObject, ownedIDs)
@@ -280,9 +280,10 @@ func UnrecoverableCreateError(createErr error) bool {
 //     revisions in inCluster contexts
 func (r *RealResourceContextControl) DecideContextsRevisionBeforeCreate(
 	ownedIDs, newIDs map[int]*api.ContextDetail,
-	rollingUpdateStrategy *api.RollingUpdateStrategy,
+	spec *api.XSetSpec,
 	currentRevision, updatedRevision string,
 ) {
+	rollingUpdateStrategy := spec.UpdateStrategy.RollingUpdate
 	if rollingUpdateStrategy == nil {
 		for i := range newIDs {
 			r.Put(newIDs[i], api.EnumRevisionContextDataKey, updatedRevision)
@@ -304,21 +305,22 @@ func (r *RealResourceContextControl) DecideContextsRevisionBeforeCreate(
 		return
 	}
 
+	replicas := ptr.Deref(spec.Replicas, 0)
 	partition := ptr.Deref(rollingUpdateStrategy.ByPartition.Partition, 0)
-	var currentRevisionReplicas int
+	var updatedReplicas int
 	for i := range ownedIDs {
 		if _, exist := r.Get(ownedIDs[i], api.EnumReplaceOriginTargetIDContextDataKey); exist {
 			continue
 		}
-		if r.Contains(ownedIDs[i], api.EnumRevisionContextDataKey, currentRevision) {
-			currentRevisionReplicas++
+		if r.Contains(ownedIDs[i], api.EnumRevisionContextDataKey, updatedRevision) {
+			updatedReplicas++
 		}
 	}
 	for i := range newIDs {
-		if i < int(partition)-currentRevisionReplicas {
-			r.Put(newIDs[i], api.EnumRevisionContextDataKey, currentRevision)
-		} else {
+		if i < int(replicas-partition)-updatedReplicas {
 			r.Put(newIDs[i], api.EnumRevisionContextDataKey, updatedRevision)
+		} else {
+			r.Put(newIDs[i], api.EnumRevisionContextDataKey, currentRevision)
 		}
 	}
 }
@@ -438,7 +440,7 @@ func (r *RealResourceContextControl) doAllocateID(
 	ownedIDs, existingIDs map[int]*api.ContextDetail,
 	unRecordIDs map[int]string,
 	replicas int, ownerName string,
-	rollingUpdateStrategy *api.RollingUpdateStrategy,
+	spec *api.XSetSpec,
 	currentRevision, updatedRevision string,
 ) map[int]*api.ContextDetail {
 	// first add unRecorded ids into ownedIDs
@@ -448,7 +450,7 @@ func (r *RealResourceContextControl) doAllocateID(
 	newIDs := r.allocateNewIDs(ownedIDs, existingIDs, replicas, ownerName)
 
 	// decide revision for newIDs
-	r.DecideContextsRevisionBeforeCreate(ownedIDs, newIDs, rollingUpdateStrategy, currentRevision, updatedRevision)
+	r.DecideContextsRevisionBeforeCreate(ownedIDs, newIDs, spec, currentRevision, updatedRevision)
 
 	for k, v := range newIDs {
 		ownedIDs[k] = v
