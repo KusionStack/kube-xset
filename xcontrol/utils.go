@@ -21,6 +21,7 @@ import (
 	"strconv"
 	"time"
 
+	appsv1 "k8s.io/api/apps/v1"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
 	"kusionstack.io/kube-xset/api"
@@ -44,6 +45,16 @@ func GetInstanceID(xsetLabelAnnoMgr api.XSetLabelAnnotationManager, target clien
 	}
 
 	return int(id), nil
+}
+
+func GetTargetRevision(target client.Object, defaultRevision string) string {
+	if target.GetLabels() == nil {
+		return defaultRevision
+	}
+	if rv, exist := target.GetLabels()[appsv1.ControllerRevisionHashLabelKey]; exist {
+		return rv
+	}
+	return defaultRevision
 }
 
 func GetShorterDuration(a, b *time.Duration) *time.Duration {

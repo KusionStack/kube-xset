@@ -175,7 +175,7 @@ func (r *RealSyncControl) SyncTargets(ctx context.Context, instance api.XSetObje
 	// get owned IDs
 	var ownedIDs map[int]*api.ContextDetail
 	if err = retry.RetryOnConflict(retry.DefaultRetry, func() error {
-		ownedIDs, err = r.resourceContextControl.AllocateID(ctx, instance, syncContext.UpdatedRevision.GetName(), int(ptr.Deref(xspec.Replicas, 0)), syncContext.FilteredTarget)
+		ownedIDs, err = r.resourceContextControl.AllocateID(ctx, instance, syncContext.CurrentRevision.GetName(), syncContext.UpdatedRevision.GetName(), int(ptr.Deref(xspec.Replicas, 0)), syncContext.FilteredTarget)
 		syncContext.OwnedIds = ownedIDs
 		return err
 	}); err != nil {

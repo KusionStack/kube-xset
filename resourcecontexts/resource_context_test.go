@@ -20,10 +20,8 @@ import (
 	"reflect"
 	"testing"
 
-	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/client-go/tools/record"
-	appsv1alpha1 "kusionstack.io/kube-api/apps/v1alpha1"
 	"kusionstack.io/kube-utils/controller/expectations"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
@@ -42,12 +40,15 @@ func TestRealResourceContextControl_fulfillOwnedIDs(t *testing.T) {
 		xsetLabelManager       api.XSetLabelAnnotationManager
 	}
 	type args struct {
-		ownedIDs        map[int]*api.ContextDetail
-		existingIDs     map[int]*api.ContextDetail
-		unRecordIDs     map[int]string
-		replicas        int
-		owner           api.XSetObject
-		defaultRevision string
+		ownedIDs              map[int]*api.ContextDetail
+		existingIDs           map[int]*api.ContextDetail
+		unRecordIDs           map[int]string
+		replicas              int
+		owner                 api.XSetObject
+		ownerName             string
+		rollingUpdateStrategy *api.RollingUpdateStrategy
+		currentRevision       string
+		updatedRevision       string
 	}
 	tests := []struct {
 		name   string
@@ -70,10 +71,12 @@ func TestRealResourceContextControl_fulfillOwnedIDs(t *testing.T) {
 						Data: map[string]string{"Owner": "foo", "Revision": "defaultRv", "TargetJustCreate": "true"},
 					},
 				},
-				unRecordIDs:     map[int]string{},
-				replicas:        5,
-				owner:           &appsv1alpha1.CollaSet{ObjectMeta: metav1.ObjectMeta{Name: "foo"}},
-				defaultRevision: "defaultRv",
+				unRecordIDs:           map[int]string{},
+				ownerName:             "foo",
+				rollingUpdateStrategy: nil,
+				replicas:              5,
+				currentRevision:       "defaultRv",
+				updatedRevision:       "defaultRv",
 			},
 			fields: fields{
 				Client:                 nil,
@@ -131,10 +134,12 @@ func TestRealResourceContextControl_fulfillOwnedIDs(t *testing.T) {
 						Data: map[string]string{"Owner": "foo", "Revision": "defaultRv", "TargetJustCreate": "true"},
 					},
 				},
-				unRecordIDs:     map[int]string{3: "defaultRv"},
-				replicas:        2,
-				owner:           &appsv1alpha1.CollaSet{ObjectMeta: metav1.ObjectMeta{Name: "foo"}},
-				defaultRevision: "defaultRv",
+				unRecordIDs:           map[int]string{3: "defaultRv"},
+				replicas:              2,
+				ownerName:             "foo",
+				rollingUpdateStrategy: nil,
+				currentRevision:       "defaultRv",
+				updatedRevision:       "defaultRv",
 			},
 			fields: fields{
 				Client:                 nil,
@@ -184,10 +189,12 @@ func TestRealResourceContextControl_fulfillOwnedIDs(t *testing.T) {
 						Data: map[string]string{"Owner": "foo", "Revision": "defaultRv", "TargetJustCreate": "true"},
 					},
 				},
-				unRecordIDs:     map[int]string{3: "defaultRv"},
-				replicas:        4,
-				owner:           &appsv1alpha1.CollaSet{ObjectMeta: metav1.ObjectMeta{Name: "foo"}},
-				defaultRevision: "defaultRv",
+				unRecordIDs:           map[int]string{3: "defaultRv"},
+				replicas:              4,
+				ownerName:             "foo",
+				rollingUpdateStrategy: nil,
+				currentRevision:       "defaultRv",
+				updatedRevision:       "defaultRv",
 			},
 			fields: fields{
 				Client:                 nil,
@@ -231,8 +238,8 @@ func TestRealResourceContextControl_fulfillOwnedIDs(t *testing.T) {
 				cacheExpectations:      tt.fields.cacheExpectations,
 				xsetLabelManager:       tt.fields.xsetLabelManager,
 			}
-			if got := r.fulfillOwnedIDs(tt.args.ownedIDs, tt.args.existingIDs, tt.args.unRecordIDs, tt.args.replicas, tt.args.owner, tt.args.defaultRevision); !reflect.DeepEqual(got, tt.want) {
-				t.Errorf("fulfillOwnedIDs() = %v, want %v", got, tt.want)
+			if got := r.doAllocateID(tt.args.ownedIDs, tt.args.existingIDs, tt.args.unRecordIDs, tt.args.replicas, tt.args.ownerName, tt.args.rollingUpdateStrategy, tt.args.currentRevision, tt.args.updatedRevision); !reflect.DeepEqual(got, tt.want) {
+				t.Errorf("ownedIDs() = %v, want %v", got, tt.want)
 			}
 		})
 	}
