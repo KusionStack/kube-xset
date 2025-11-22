@@ -435,7 +435,7 @@ func TestRealResourceContextControl_DecideContextsRevisionBeforeCreate(t *testin
 			},
 		},
 		{
-			name: "ownedIDs[0: oldRevision, 1: oldRevision], replicas: 5, partition: 4, want newIDs[2: oldRevision, 3: newRevision, 3: newRevision]",
+			name: "ownedIDs[0: oldRevision, 1: oldRevision], replicas: 5, partition: 4, want newIDs[2: oldRevision, 3: oldRevision, 4: newRevision]",
 			fields: fields{
 				Client:                 nil,
 				EventRecorder:          nil,
@@ -466,6 +466,10 @@ func TestRealResourceContextControl_DecideContextsRevisionBeforeCreate(t *testin
 						ID:   3,
 						Data: map[string]string{"Owner": "foo"},
 					},
+					4: {
+						ID:   4,
+						Data: map[string]string{"Owner": "foo"},
+					},
 				},
 				spec: &api.XSetSpec{
 					Replicas: pointer.Int32(4),
@@ -479,10 +483,14 @@ func TestRealResourceContextControl_DecideContextsRevisionBeforeCreate(t *testin
 			want: map[int]*api.ContextDetail{
 				2: {
 					ID:   2,
-					Data: map[string]string{"Owner": "foo", "Revision": "newRevision"},
+					Data: map[string]string{"Owner": "foo", "Revision": "oldRevision"},
 				},
 				3: {
 					ID:   3,
+					Data: map[string]string{"Owner": "foo", "Revision": "oldRevision"},
+				},
+				4: {
+					ID:   4,
 					Data: map[string]string{"Owner": "foo", "Revision": "newRevision"},
 				},
 			},
