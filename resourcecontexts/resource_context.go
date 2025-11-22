@@ -281,7 +281,8 @@ func UnrecoverableCreateError(createErr error) bool {
 func (r *RealResourceContextControl) DecideContextsRevisionBeforeCreate(
 	ownedIDs, newIDs map[int]*api.ContextDetail,
 	rollingUpdateStrategy *api.RollingUpdateStrategy,
-	currentRevision, updatedRevision string) {
+	currentRevision, updatedRevision string,
+) {
 	if rollingUpdateStrategy == nil {
 		for i := range newIDs {
 			r.Put(newIDs[i], api.EnumRevisionContextDataKey, updatedRevision)
@@ -437,16 +438,17 @@ func (r *RealResourceContextControl) doAllocateID(
 	ownedIDs, existingIDs map[int]*api.ContextDetail,
 	unRecordIDs map[int]string,
 	replicas int, ownerName string,
-	RollingUpdateStrategy *api.RollingUpdateStrategy,
-	currentRevision, updatedRevision string) map[int]*api.ContextDetail {
+	rollingUpdateStrategy *api.RollingUpdateStrategy,
+	currentRevision, updatedRevision string,
+) map[int]*api.ContextDetail {
 	// first add unRecorded ids into ownedIDs
 	r.addUnrecordedIDs(ownedIDs, unRecordIDs, ownerName)
 
-	// find new IDs for owner to fulfil replicas
+	// find new IDs for owner to fulfill replicas
 	newIDs := r.allocateNewIDs(ownedIDs, existingIDs, replicas, ownerName)
 
 	// decide revision for newIDs
-	r.DecideContextsRevisionBeforeCreate(ownedIDs, newIDs, RollingUpdateStrategy, currentRevision, updatedRevision)
+	r.DecideContextsRevisionBeforeCreate(ownedIDs, newIDs, rollingUpdateStrategy, currentRevision, updatedRevision)
 
 	for k, v := range newIDs {
 		ownedIDs[k] = v

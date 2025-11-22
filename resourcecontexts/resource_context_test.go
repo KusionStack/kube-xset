@@ -44,7 +44,6 @@ func TestRealResourceContextControl_fulfillOwnedIDs(t *testing.T) {
 		existingIDs           map[int]*api.ContextDetail
 		unRecordIDs           map[int]string
 		replicas              int
-		owner                 api.XSetObject
 		ownerName             string
 		rollingUpdateStrategy *api.RollingUpdateStrategy
 		currentRevision       string

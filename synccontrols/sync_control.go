@@ -980,7 +980,7 @@ func (r *RealSyncControl) getAvailableTargetIDs(
 	var newOwnedIDs map[int]*api.ContextDetail
 	var err error
 	if err := retry.RetryOnConflict(retry.DefaultRetry, func() error {
-		newOwnedIDs, err = r.resourceContextControl.AllocateID(ctx, instance, syncContext.UpdatedRevision.GetName(), len(ownedIDs)+diff, nil)
+		newOwnedIDs, err = r.resourceContextControl.AllocateID(ctx, instance, syncContext.CurrentRevision.GetName(), syncContext.UpdatedRevision.GetName(), len(ownedIDs)+diff, nil)
 		return err
 	}); err != nil {
 		return nil, ownedIDs, fmt.Errorf("fail to allocate IDs using context when include Targets: %w", err)
