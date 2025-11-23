@@ -200,7 +200,7 @@ func (r *RealSyncControl) replaceOriginTargets(
 
 			patch := client.RawPatch(types.MergePatchType, []byte(fmt.Sprintf(`{"metadata":{"labels":{%q:%q}}}`, r.xsetLabelAnnoMgr.Value(api.XReplacePairNewId), newInstanceId)))
 			if err = r.xControl.PatchTarget(ctx, originTarget, patch); err != nil {
-				return fmt.Errorf("fail to update origin target %s/%s pair label %s when updating by replaceUpdate: %s", originTarget.GetNamespace(), originTarget.GetName(), newCreatedTarget.GetName(), err.Error())
+				return fmt.Errorf("fail to update origin target %s/%s pair label %s when updating by replaceUpdate: %w", originTarget.GetNamespace(), originTarget.GetName(), newCreatedTarget.GetName(), err)
 			}
 			logger.Info("replaceOriginTargets", "replacing originTarget", originTarget.GetName(), "originTargetId", originTargetId, "newTargetContextID", newInstanceId)
 			return nil
@@ -319,8 +319,8 @@ func updateReplaceOriginTarget(
 		if exist && currentRevision != originTargetUpdateInfo.UpdateRevision.GetName() && !deletionIndicate {
 			patch := client.RawPatch(types.MergePatchType, []byte(fmt.Sprintf(`{"metadata":{"labels":{%q:"%d"}}}`, xsetLabelAnnoMgr.Value(api.XDeletionIndicationLabelKey), time.Now().UnixNano())))
 			if patchErr := c.Patch(ctx, newTarget, patch); patchErr != nil {
-				err := fmt.Errorf("failed to delete replace pair new target %s/%s %s",
-					newTarget.GetNamespace(), newTarget.GetName(), patchErr.Error())
+				err := fmt.Errorf("failed to delete replace pair new target %s/%s %w",
+					newTarget.GetNamespace(), newTarget.GetName(), patchErr)
 				return err
 			}
 			recorder.Eventf(originTarget,
@@ -340,7 +340,7 @@ func updateReplaceOriginTarget(
 		now := time.Now().UnixNano()
 		patch := client.RawPatch(types.MergePatchType, []byte(fmt.Sprintf(`{"metadata":{"labels":{%q:"%v", %q: "%v"}}}`, xsetLabelAnnoMgr.Value(api.XReplaceIndicationLabelKey), now, xsetLabelAnnoMgr.Value(api.XReplaceByReplaceUpdateLabelKey), originTargetUpdateInfo.UpdateRevision.Name)))
 		if err := c.Patch(ctx, originTarget, patch); err != nil {
-			return fmt.Errorf("fail to label origin target %s/%s with replace indicate label by replaceUpdate: %s", originTarget.GetNamespace(), originTarget.GetName(), err.Error())
+			return fmt.Errorf("fail to label origin target %s/%s with replace indicate label by replaceUpdate: %w", originTarget.GetNamespace(), originTarget.GetName(), err)
 		}
 		recorder.Eventf(originTarget,
 			corev1.EventTypeNormal,

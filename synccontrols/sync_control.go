@@ -26,12 +26,12 @@ import (
 	"time"
 
 	"github.com/go-logr/logr"
-	appsv1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/apimachinery/pkg/util/sets"
+	"k8s.io/apimachinery/pkg/util/validation/field"
 	"k8s.io/client-go/util/retry"
 	"k8s.io/utils/ptr"
 	clientutil "kusionstack.io/kube-utils/client"
@@ -165,7 +165,7 @@ func (r *RealSyncControl) SyncTargets(ctx context.Context, instance api.XSetObje
 	// sync include exclude targets
 	toExcludeTargetNames, toIncludeTargetNames, err := r.dealIncludeExcludeTargets(ctx, instance, syncContext.FilteredTarget)
 	if err != nil {
-		return false, fmt.Errorf("fail to deal with include exclude targets: %s", err.Error())
+		return false, fmt.Errorf("fail to deal with include exclude targets: %w", err)
 	}
 
 	if err := r.resourceContextControl.CleanUnusedIDs(ctx, instance, syncContext.FilteredTarget); err != nil {
@@ -175,7 +175,7 @@ func (r *RealSyncControl) SyncTargets(ctx context.Context, instance api.XSetObje
 	// get owned IDs
 	var ownedIDs map[int]*api.ContextDetail
 	if err = retry.RetryOnConflict(retry.DefaultRetry, func() error {
-		ownedIDs, err = r.resourceContextControl.AllocateID(ctx, instance, syncContext.UpdatedRevision.GetName(), int(ptr.Deref(xspec.Replicas, 0)), syncContext.FilteredTarget)
+		ownedIDs, err = r.resourceContextControl.AllocateID(ctx, instance, syncContext.CurrentRevision.GetName(), syncContext.UpdatedRevision.GetName(), int(ptr.Deref(xspec.Replicas, 0)), syncContext.FilteredTarget)
 		syncContext.OwnedIds = ownedIDs
 		return err
 	}); err != nil {
@@ -522,7 +522,7 @@ func (r *RealSyncControl) Scale(ctx context.Context, xsetObject api.XSetObject, 
 			succCount, err := controllerutils.SlowStartBatch(len(availableContexts), controllerutils.SlowStartInitialBatchSize, false, func(i int, _ error) (err error) {
 				availableIDContext := availableContexts[i]
 				defer func() {
-					if r.decideContextRevision(availableIDContext, syncContext.UpdatedRevision, err == nil) {
+					if r.resourceContextControl.DecideContextRevisionAfterCreate(availableIDContext, syncContext.UpdatedRevision, err) {
 						needUpdateContext.Store(true)
 					}
 				}()
@@ -569,7 +569,7 @@ func (r *RealSyncControl) Scale(ctx context.Context, xsetObject api.XSetObject, 
 					r.xsetController.GetXSetTemplatePatcher(xsetObject),
 				)
 				if err != nil {
-					return fmt.Errorf("fail to new Target from revision %s: %w", revision.GetName(), err)
+					return apierrors.NewInvalid(schema.GroupKind{Group: r.targetGVK.Group, Kind: r.targetGVK.Kind}, target.GetGenerateName(), []*field.Error{{Detail: err.Error()}})
 				}
 				// create pvcs for targets (pod)
 				if _, enabled := subresources.GetSubresourcePvcAdapter(r.xsetController); enabled {
@@ -980,7 +980,7 @@ func (r *RealSyncControl) getAvailableTargetIDs(
 	var newOwnedIDs map[int]*api.ContextDetail
 	var err error
 	if err := retry.RetryOnConflict(retry.DefaultRetry, func() error {
-		newOwnedIDs, err = r.resourceContextControl.AllocateID(ctx, instance, syncContext.UpdatedRevision.GetName(), len(ownedIDs)+diff, nil)
+		newOwnedIDs, err = r.resourceContextControl.AllocateID(ctx, instance, syncContext.CurrentRevision.GetName(), syncContext.UpdatedRevision.GetName(), len(ownedIDs)+diff, nil)
 		return err
 	}); err != nil {
 		return nil, ownedIDs, fmt.Errorf("fail to allocate IDs using context when include Targets: %w", err)
@@ -1063,28 +1063,4 @@ func (r *RealSyncControl) BatchDeleteTargetsByLabel(ctx context.Context, targetC
 		return nil
 	})
 	return err
-}
-
-// decideContextRevision decides revision for 3 target create types: (1) just create, (2) upgrade by recreate, (3) delete and recreate
-func (r *RealSyncControl) decideContextRevision(contextDetail *api.ContextDetail, updatedRevision *appsv1.ControllerRevision, createSucceeded bool) bool {
-	needUpdateContext := false
-	if !createSucceeded {
-		if r.resourceContextControl.Contains(contextDetail, api.EnumJustCreateContextDataKey, "true") {
-			// TODO choose just create targets' revision according to scaleStrategy
-			r.resourceContextControl.Put(contextDetail, api.EnumRevisionContextDataKey, updatedRevision.GetName())
-			r.resourceContextControl.Remove(contextDetail, api.EnumTargetDecorationRevisionKey)
-			needUpdateContext = true
-		} else if r.resourceContextControl.Contains(contextDetail, api.EnumRecreateUpdateContextDataKey, "true") {
-			r.resourceContextControl.Put(contextDetail, api.EnumRevisionContextDataKey, updatedRevision.GetName())
-			r.resourceContextControl.Remove(contextDetail, api.EnumTargetDecorationRevisionKey)
-			needUpdateContext = true
-		}
-		// if target is delete and recreate, never change revisionKey
-	} else {
-		// TODO delete ID if create succeeded
-		r.resourceContextControl.Remove(contextDetail, api.EnumJustCreateContextDataKey)
-		r.resourceContextControl.Remove(contextDetail, api.EnumRecreateUpdateContextDataKey)
-		needUpdateContext = true
-	}
-	return needUpdateContext
 }

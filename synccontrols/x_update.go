@@ -354,7 +354,7 @@ func (u *GenericTargetUpdater) BeginUpdateTarget(ctx context.Context, syncContex
 			}
 			return false, nil
 		}); err != nil {
-			return fmt.Errorf("fail to begin TargetOpsLifecycle for updating Target %s/%s: %s", targetInfo.GetNamespace(), targetInfo.GetName(), err.Error())
+			return fmt.Errorf("fail to begin TargetOpsLifecycle for updating Target %s/%s: %w", targetInfo.GetNamespace(), targetInfo.GetName(), err)
 		} else if updated {
 			// add an expectation for this target update, before next reconciling
 			if err := u.CacheExpectations.ExpectUpdation(clientutil.ObjectKeyString(u.OwnerObject), u.TargetGVK, targetInfo.GetNamespace(), targetInfo.GetName(), targetInfo.GetResourceVersion()); err != nil {
@@ -450,7 +450,7 @@ func (u *GenericTargetUpdater) FinishUpdateTarget(ctx context.Context, targetInf
 
 	// target is ops finished, finish the lifecycle gracefully
 	if updated, err := opslifecycle.Finish(ctx, u.XsetLabelAnnoMgr, u.Client, u.updateLifecycleAdapter, targetInfo.Object); err != nil {
-		return fmt.Errorf("failed to finish TargetOpsLifecycle for updating Target %s/%s: %s", targetInfo.GetNamespace(), targetInfo.GetName(), err.Error())
+		return fmt.Errorf("failed to finish TargetOpsLifecycle for updating Target %s/%s: %w", targetInfo.GetNamespace(), targetInfo.GetName(), err)
 	} else if updated {
 		// add an expectation for this target update, before next reconciling
 		if err := u.CacheExpectations.ExpectUpdation(clientutil.ObjectKeyString(u.OwnerObject), u.TargetGVK, targetInfo.GetNamespace(), targetInfo.GetName(), targetInfo.GetResourceVersion()); err != nil {
@@ -509,7 +509,7 @@ func (r *RealSyncControl) newTargetUpdater(xset api.XSetObject) TargetUpdater {
 
 func (u *GenericTargetUpdater) RecreateTarget(ctx context.Context, targetInfo *TargetUpdateInfo) error {
 	if err := u.TargetControl.DeleteTarget(ctx, targetInfo.Object); err != nil {
-		return fmt.Errorf("fail to delete Target %s/%s when updating by recreate: %v", targetInfo.GetNamespace(), targetInfo.GetName(), err.Error())
+		return fmt.Errorf("fail to delete Target %s/%s when updating by recreate: %w", targetInfo.GetNamespace(), targetInfo.GetName(), err)
 	}
 
 	u.Recorder.Eventf(targetInfo.Object,
@@ -572,8 +572,8 @@ func (u *replaceUpdateTargetUpdater) BeginUpdateTarget(ctx context.Context, sync
 				syncContext.UpdatedRevision.GetName())
 			patch := client.RawPatch(types.MergePatchType, []byte(fmt.Sprintf(`{"metadata":{"labels":{%q:"%d"}}}`, u.XsetLabelAnnoMgr.Value(api.XDeletionIndicationLabelKey), time.Now().UnixNano())))
 			if patchErr := u.Client.Patch(ctx, targetInfo.ReplacePairNewTargetInfo.Object, patch); patchErr != nil {
-				err := fmt.Errorf("failed to delete replace pair new target %s/%s %s",
-					targetInfo.ReplacePairNewTargetInfo.GetNamespace(), targetInfo.ReplacePairNewTargetInfo.GetName(), patchErr.Error())
+				err := fmt.Errorf("failed to delete replace pair new target %s/%s %w",
+					targetInfo.ReplacePairNewTargetInfo.GetNamespace(), targetInfo.ReplacePairNewTargetInfo.GetName(), patchErr)
 				return err
 			}
 		}
@@ -629,7 +629,7 @@ func (u *replaceUpdateTargetUpdater) FinishUpdateTarget(ctx context.Context, tar
 		if _, exist := u.XsetLabelAnnoMgr.Get(targetInfo.Object, api.XDeletionIndicationLabelKey); !exist {
 			patch := client.RawPatch(types.MergePatchType, []byte(fmt.Sprintf(`{"metadata":{"labels":{%q:"%d"}}}`, u.XsetLabelAnnoMgr.Value(api.XDeletionIndicationLabelKey), time.Now().UnixNano())))
 			if err := u.TargetControl.PatchTarget(ctx, targetInfo.Object, patch); err != nil {
-				return fmt.Errorf("failed to delete replace pair origin target %s/%s %s", targetInfo.GetNamespace(), targetInfo.ReplacePairNewTargetInfo.GetName(), err.Error())
+				return fmt.Errorf("failed to delete replace pair origin target %s/%s %w", targetInfo.GetNamespace(), targetInfo.ReplacePairNewTargetInfo.GetName(), err)
 			}
 		}
 	}

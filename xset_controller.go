@@ -118,11 +118,11 @@ func SetUpWithManager(mgr ctrl.Manager, xsetController api.XSetController) error
 		Reconciler:              reconciler,
 	})
 	if err != nil {
-		return fmt.Errorf("failed to create controller: %s", err.Error())
+		return fmt.Errorf("failed to create controller: %w", err)
 	}
 
 	if err := c.Watch(&source.Kind{Type: xsetController.NewXSetObject()}, &handler.EnqueueRequestForObject{}); err != nil {
-		return fmt.Errorf("failed to watch %s: %s", xsetController.XSetMeta().Kind, err.Error())
+		return fmt.Errorf("failed to watch %s: %w", xsetController.XSetMeta().Kind, err)
 	}
 
 	if err := c.Watch(&source.Kind{Type: xsetController.NewXObject()}, &handler.EnqueueRequestForOwner{
@@ -143,7 +143,7 @@ func SetUpWithManager(mgr ctrl.Manager, xsetController api.XSetController) error
 			return synccontrols.IsControlledByXSet(xsetLabelManager, genericEvent.Object)
 		},
 	}); err != nil {
-		return fmt.Errorf("failed to watch %s: %s", targetMeta.Kind, err.Error())
+		return fmt.Errorf("failed to watch %s: %w", targetMeta.Kind, err)
 	}
 
 	// watch for decoration changed
@@ -208,7 +208,7 @@ func (r *xSetCommonReconciler) Reconcile(ctx context.Context, req reconcile.Requ
 
 	currentRevision, updatedRevision, revisions, collisionCount, _, err := r.revisionManager.ConstructRevisions(ctx, instance)
 	if err != nil {
-		return ctrl.Result{}, fmt.Errorf("fail to construct revision for %s %s: %s", kind, key, err.Error())
+		return ctrl.Result{}, fmt.Errorf("fail to construct revision for %s %s: %w", kind, key, err)
 	}
 
 	xsetStatus := r.XSetController.GetXSetStatus(instance)
@@ -231,7 +231,7 @@ func (r *xSetCommonReconciler) Reconcile(ctx context.Context, req reconcile.Requ
 	newStatus = r.syncControl.CalculateStatus(ctx, instance, syncContext)
 	// update status anyway
 	if err := r.updateStatus(ctx, instance, newStatus); err != nil {
-		return requeueResult(requeueAfter), fmt.Errorf("fail to update status of %s %s: %s", kind, req, err.Error())
+		return requeueResult(requeueAfter), fmt.Errorf("fail to update status of %s %s: %w", kind, req, err)
 	}
 	return requeueResult(requeueAfter), syncErr
 }
@@ -298,7 +298,7 @@ func (r *xSetCommonReconciler) ensureReclaimTargetsDeletion(ctx context.Context,
 	xSetSpec := r.XSetController.GetXSetSpec(instance)
 	_, targets, err := r.targetControl.GetFilteredTargets(ctx, xSetSpec.Selector, instance)
 	if err != nil {
-		return false, fmt.Errorf("fail to get filtered Targets: %s", err.Error())
+		return false, fmt.Errorf("fail to get filtered Targets: %w", err)
 	}
 	// if targets are deleted, return true
 	if len(targets) == 0 {
@@ -324,7 +324,7 @@ func (r *xSetCommonReconciler) ensureReclaimOwnerReferences(ctx context.Context,
 	xSetSpec := r.XSetController.GetXSetSpec(instance)
 	_, filteredTargets, err := r.targetControl.GetFilteredTargets(ctx, xSetSpec.Selector, instance)
 	if err != nil {
-		return fmt.Errorf("fail to get filtered Targets: %s", err.Error())
+		return fmt.Errorf("fail to get filtered Targets: %w", err)
 	}
 	// reclaim decoration ownerReferences on filteredPods
 	gvk := decorationAdapter.GetDecorationGroupVersionKind()
@@ -352,7 +352,7 @@ func (r *xSetCommonReconciler) ensureReclaimOwnerReferences(ctx context.Context,
 func (r *xSetCommonReconciler) updateStatus(ctx context.Context, instance api.XSetObject, status *api.XSetStatus) error {
 	r.XSetController.SetXSetStatus(instance, status)
 	if err := r.Client.Status().Update(ctx, instance); err != nil {
-		return fmt.Errorf("fail to update status of %s: %s", instance.GetName(), err.Error())
+		return fmt.Errorf("fail to update status of %s: %w", instance.GetName(), err)
 	}
 	return r.cacheExpectations.ExpectUpdation(clientutil.ObjectKeyString(instance), r.xsetGVK, instance.GetNamespace(), instance.GetName(), instance.GetResourceVersion())
 }

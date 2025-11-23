@@ -241,12 +241,12 @@ func (pc *RealPvcControl) AdoptPvc(ctx context.Context, xset api.XSetObject, pvc
 	refWriter := refmanagerutil.NewOwnerRefWriter(pc.client)
 	matcher, err := refmanagerutil.LabelSelectorAsMatch(xsetSpec.Selector)
 	if err != nil {
-		return fmt.Errorf("fail to create labelSelector matcher: %s", err.Error())
+		return fmt.Errorf("fail to create labelSelector matcher: %w", err)
 	}
 	refManager := refmanagerutil.NewObjectControllerRefManager(refWriter, xset, xset.GetObjectKind().GroupVersionKind(), matcher)
 
 	if _, err := refManager.Claim(ctx, pvc); err != nil {
-		return fmt.Errorf("failed to adopt pvc: %s", err.Error())
+		return fmt.Errorf("failed to adopt pvc: %w", err)
 	}
 	return nil
 }
@@ -265,7 +265,7 @@ func (pc *RealPvcControl) OrphanPvc(ctx context.Context, xset api.XSetObject, pv
 
 	refWriter := refmanagerutil.NewOwnerRefWriter(pc.client)
 	if err := refWriter.Release(ctx, xset, pvc); err != nil {
-		return fmt.Errorf("failed to orphan target: %s", err.Error())
+		return fmt.Errorf("failed to orphan target: %w", err)
 	}
 	return nil
 }
@@ -548,7 +548,7 @@ func setUpCache(cache cache.Cache, controller api.XSetController) error {
 		}
 		return []string{string(ownerRef.UID)}
 	}); err != nil {
-		return fmt.Errorf("failed to index by field for pvc->xset %s: %s", FieldIndexOwnerRefUID, err.Error())
+		return fmt.Errorf("failed to index by field for pvc->xset %s: %w", FieldIndexOwnerRefUID, err)
 	}
 	return nil
 }
