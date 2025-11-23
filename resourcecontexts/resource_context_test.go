@@ -472,9 +472,13 @@ func TestRealResourceContextControl_DecideContextsRevisionBeforeCreate(t *testin
 					},
 				},
 				spec: &api.XSetSpec{
-					Replicas: pointer.Int32(4),
+					Replicas: pointer.Int32(5),
 					UpdateStrategy: api.UpdateStrategy{
-						RollingUpdate: nil,
+						RollingUpdate: &api.RollingUpdateStrategy{
+							ByPartition: &api.ByPartition{
+								Partition: pointer.Int32(4),
+							},
+						},
 					},
 				},
 				currentRevision: "oldRevision",
