@@ -332,6 +332,50 @@ type TargetUpdater interface {
 	FinishUpdateTarget(ctx context.Context, targetInfo *TargetUpdateInfo, finishByCancelUpdate bool) error
 }
 
+var NewInPlaceOnlyPossibleUpdaterFunc func() TargetUpdater
+
+// RegisterInPlaceOnlyUpdater Support users to define inPlaceOnlyTargetUpdater and register through RegisterInPlaceOnlyUpdater
+func RegisterInPlaceOnlyUpdater(f func() TargetUpdater) {
+	NewInPlaceIfPossibleUpdaterFunc = f
+}
+
+var NewInPlaceIfPossibleUpdaterFunc func() TargetUpdater
+
+// RegisterInPlaceIfPossibleUpdater Support users to define inPlaceIfPossibleUpdater and register through RegistryInPlaceIfPossibleUpdater
+func RegisterInPlaceIfPossibleUpdater(f func() TargetUpdater) {
+	NewInPlaceIfPossibleUpdaterFunc = f
+}
+
+func (r *RealSyncControl) newTargetUpdater(xset api.XSetObject) TargetUpdater {
+	spec := r.xsetController.GetXSetSpec(xset)
+	var targetUpdater TargetUpdater
+	switch spec.UpdateStrategy.UpdatePolicy {
+	case api.XSetRecreateTargetUpdateStrategyType:
+		targetUpdater = &recreateTargetUpdater{}
+	case api.XSetInPlaceOnlyTargetUpdateStrategyType:
+		if NewInPlaceOnlyPossibleUpdaterFunc != nil {
+			targetUpdater = NewInPlaceOnlyPossibleUpdaterFunc()
+		} else if NewInPlaceIfPossibleUpdaterFunc != nil {
+			// In case of using native K8s, Target is only allowed to update with container image, so InPlaceOnly policy is
+			// implemented with InPlaceIfPossible policy as default for compatibility.
+			targetUpdater = NewInPlaceIfPossibleUpdaterFunc()
+		} else {
+			// if none of InplaceOnly and InplaceIfPossible updater is registered, use default Recreate updater
+			targetUpdater = &recreateTargetUpdater{}
+		}
+	case api.XSetReplaceTargetUpdateStrategyType:
+		targetUpdater = &replaceUpdateTargetUpdater{}
+	default:
+		if NewInPlaceIfPossibleUpdaterFunc != nil {
+			targetUpdater = NewInPlaceIfPossibleUpdaterFunc()
+		} else {
+			targetUpdater = &recreateTargetUpdater{}
+		}
+	}
+	targetUpdater.Setup(r.updateConfig, xset)
+	return targetUpdater
+}
+
 type GenericTargetUpdater struct {
 	OwnerObject api.XSetObject
 
@@ -461,50 +505,6 @@ func (u *GenericTargetUpdater) FinishUpdateTarget(ctx context.Context, targetInf
 			"UpdateReady", "target %s/%s update finished", targetInfo.GetNamespace(), targetInfo.GetName())
 	}
 	return nil
-}
-
-// Support users to define inPlaceOnlyTargetUpdater and register through RegisterInPlaceOnlyUpdater
-var inPlaceOnlyTargetUpdater TargetUpdater
-
-func RegisterInPlaceOnlyUpdater(targetUpdater TargetUpdater) {
-	inPlaceOnlyTargetUpdater = targetUpdater
-}
-
-// Support users to define inPlaceIfPossibleUpdater and register through RegistryInPlaceIfPossibleUpdater
-var inPlaceIfPossibleUpdater TargetUpdater
-
-func RegisterInPlaceIfPossibleUpdater(targetUpdater TargetUpdater) {
-	inPlaceIfPossibleUpdater = targetUpdater
-}
-
-func (r *RealSyncControl) newTargetUpdater(xset api.XSetObject) TargetUpdater {
-	spec := r.xsetController.GetXSetSpec(xset)
-	var targetUpdater TargetUpdater
-	switch spec.UpdateStrategy.UpdatePolicy {
-	case api.XSetRecreateTargetUpdateStrategyType:
-		targetUpdater = &recreateTargetUpdater{}
-	case api.XSetInPlaceOnlyTargetUpdateStrategyType:
-		if inPlaceOnlyTargetUpdater != nil {
-			targetUpdater = inPlaceOnlyTargetUpdater
-		} else if inPlaceIfPossibleUpdater != nil {
-			// In case of using native K8s, Target is only allowed to update with container image, so InPlaceOnly policy is
-			// implemented with InPlaceIfPossible policy as default for compatibility.
-			targetUpdater = inPlaceIfPossibleUpdater
-		} else {
-			// if none of InplaceOnly and InplaceIfPossible updater is registered, use default Recreate updater
-			targetUpdater = &recreateTargetUpdater{}
-		}
-	case api.XSetReplaceTargetUpdateStrategyType:
-		targetUpdater = &replaceUpdateTargetUpdater{}
-	default:
-		if inPlaceIfPossibleUpdater != nil {
-			targetUpdater = inPlaceIfPossibleUpdater
-		} else {
-			targetUpdater = &recreateTargetUpdater{}
-		}
-	}
-	targetUpdater.Setup(r.updateConfig, xset)
-	return targetUpdater
 }
 
 func (u *GenericTargetUpdater) RecreateTarget(ctx context.Context, targetInfo *TargetUpdateInfo) error {
