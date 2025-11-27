@@ -327,6 +327,7 @@ func (r *RealResourceContextControl) DecideContextsRevisionBeforeCreate(
 	for id := range newIDs {
 		ids = append(ids, id)
 	}
+	sort.Ints(ids)
 	for i := len(ids) - 1; i >= 0; i-- {
 		id := ids[i]
 		if addUpdatedReplicas < int(replicas-partition)-updatedReplicas {
