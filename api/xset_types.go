@@ -190,6 +190,9 @@ type XSetStatus struct {
 	// +optional
 	Replicas int32 `json:"replicas,omitempty"`
 
+	// TerminatingReplicas indicates the number of targets with deletionTimestamp.
+	TerminatingReplicas int32 `json:"terminatingReplicas,omitempty"`
+
 	// the number of scheduled replicas for the replicas set.
 	// +optional
 	ScheduledReplicas int32 `json:"scheduledReplicas,omitempty"`
