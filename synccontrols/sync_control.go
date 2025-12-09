@@ -947,9 +947,9 @@ func (r *RealSyncControl) CalculateStatus(_ context.Context, instance api.XSetOb
 
 	newStatus.ReadyReplicas = readyReplicas
 	newStatus.Replicas = replicas
-	newStatus.TerminatingReplicas = terminatingReplicas
 	newStatus.UpdatedReplicas = updatedReplicas
 	newStatus.OperatingReplicas = operatingReplicas
+	newStatus.TerminatingReplicas = terminatingReplicas
 	newStatus.UpdatedReadyReplicas = updatedReadyReplicas
 	newStatus.ScheduledReplicas = scheduledReplicas
 	newStatus.AvailableReplicas = availableReplicas

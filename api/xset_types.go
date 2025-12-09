@@ -190,9 +190,6 @@ type XSetStatus struct {
 	// +optional
 	Replicas int32 `json:"replicas,omitempty"`
 
-	// TerminatingReplicas indicates the number of targets with deletionTimestamp.
-	TerminatingReplicas int32 `json:"terminatingReplicas,omitempty"`
-
 	// the number of scheduled replicas for the replicas set.
 	// +optional
 	ScheduledReplicas int32 `json:"scheduledReplicas,omitempty"`
@@ -204,6 +201,10 @@ type XSetStatus struct {
 	// OperatingReplicas indicates the number of targets during target ops lifecycle and not finish update-phase.
 	// +optional
 	OperatingReplicas int32 `json:"operatingReplicas,omitempty"`
+
+	// TerminatingReplicas indicates the number of targets with deletionTimestamp.
+	// +optional
+	TerminatingReplicas int32 `json:"terminatingReplicas,omitempty"`
 
 	// UpdatedReadyReplicas indicates the number of the target with updated revision and ready condition
 	// +optional
