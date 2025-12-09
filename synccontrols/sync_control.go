@@ -902,13 +902,16 @@ func (r *RealSyncControl) CalculateStatus(_ context.Context, instance api.XSetOb
 	newStatus := syncContext.NewStatus
 	newStatus.ObservedGeneration = instance.GetGeneration()
 
-	var readyReplicas, scheduledReplicas, replicas, updatedReplicas, operatingReplicas, updatedReadyReplicas, availableReplicas, updatedAvailableReplicas int32
+	var readyReplicas, scheduledReplicas, replicas, terminatingReplicas, updatedReplicas, operatingReplicas, updatedReadyReplicas, availableReplicas, updatedAvailableReplicas int32
 
 	activeTargets := FilterOutActiveTargetWrappers(syncContext.TargetWrappers)
 	for _, targetWrapper := range activeTargets {
 		// for naming with persistent sequences suffix, terminating targets can be shown in status
-		if targetWrapper.GetDeletionTimestamp() != nil && !IsTargetNamingSuffixPolicyPersistentSequence(r.xsetController.GetXSetSpec(instance)) {
-			continue
+		if targetWrapper.GetDeletionTimestamp() != nil {
+			terminatingReplicas++
+			if !IsTargetNamingSuffixPolicyPersistentSequence(r.xsetController.GetXSetSpec(instance)) {
+				continue
+			}
 		}
 
 		replicas++
@@ -946,6 +949,7 @@ func (r *RealSyncControl) CalculateStatus(_ context.Context, instance api.XSetOb
 	newStatus.Replicas = replicas
 	newStatus.UpdatedReplicas = updatedReplicas
 	newStatus.OperatingReplicas = operatingReplicas
+	newStatus.TerminatingReplicas = terminatingReplicas
 	newStatus.UpdatedReadyReplicas = updatedReadyReplicas
 	newStatus.ScheduledReplicas = scheduledReplicas
 	newStatus.AvailableReplicas = availableReplicas
