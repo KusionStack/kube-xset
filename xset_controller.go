@@ -180,32 +180,6 @@ func (r *xSetCommonReconciler) Reconcile(ctx context.Context, req reconcile.Requ
 		return ctrl.Result{RequeueAfter: 30 * time.Second}, nil
 	}
 
-	if instance.GetDeletionTimestamp() != nil {
-		if controllerutil.ContainsFinalizer(instance, r.finalizerName) {
-			// reclaim target sub resources before remove finalizers
-			if err := r.ensureReclaimTargetSubResources(ctx, instance); err != nil {
-				return ctrl.Result{}, err
-			}
-			// reclaim decoration ownerReferences before remove finalizers
-			if err := r.ensureReclaimOwnerReferences(ctx, instance); err != nil {
-				return ctrl.Result{}, err
-			}
-			if cleaned, err := r.ensureReclaimTargetsDeletion(ctx, instance); !cleaned || err != nil {
-				// reclaim targets deletion before remove finalizers
-				return ctrl.Result{}, err
-			}
-			// reclaim owner IDs in ResourceContextControl
-			if err := r.resourceContextControl.UpdateToTargetContext(ctx, instance, nil); err != nil {
-				return ctrl.Result{}, err
-			}
-		}
-		return ctrl.Result{}, clientutil.RemoveFinalizerAndUpdate(ctx, r.Client, instance, r.finalizerName)
-	}
-
-	if !controllerutil.ContainsFinalizer(instance, r.finalizerName) {
-		return ctrl.Result{}, clientutil.AddFinalizerAndUpdate(ctx, r.Client, instance, r.finalizerName)
-	}
-
 	currentRevision, updatedRevision, revisions, collisionCount, _, err := r.revisionManager.ConstructRevisions(ctx, instance)
 	if err != nil {
 		return ctrl.Result{}, fmt.Errorf("fail to construct revision for %s %s: %w", kind, key, err)
@@ -242,6 +216,10 @@ func (r *xSetCommonReconciler) doSync(ctx context.Context, instance api.XSetObje
 		return nil, err
 	}
 
+	if instance.GetDeletionTimestamp() != nil {
+		return nil, r.ensureFinalizer(ctx, instance)
+	}
+
 	err = r.syncControl.Replace(ctx, instance, syncContext)
 	if err != nil {
 		return nil, err
@@ -256,6 +234,35 @@ func (r *xSetCommonReconciler) doSync(ctx context.Context, instance api.XSetObje
 		return updateRequeueAfter, err
 	}
 	return scaleRequeueAfter, err
+}
+
+func (r *xSetCommonReconciler) ensureFinalizer(ctx context.Context, instance api.XSetObject) error {
+	if instance.GetDeletionTimestamp() == nil {
+		if !controllerutil.ContainsFinalizer(instance, r.finalizerName) {
+			return clientutil.AddFinalizerAndUpdate(ctx, r.Client, instance, r.finalizerName)
+		}
+		return nil
+	}
+
+	if controllerutil.ContainsFinalizer(instance, r.finalizerName) {
+		// reclaim target sub resources before remove finalizers
+		if err := r.ensureReclaimTargetSubResources(ctx, instance); err != nil {
+			return err
+		}
+		// reclaim decoration ownerReferences before remove finalizers
+		if err := r.ensureReclaimOwnerReferences(ctx, instance); err != nil {
+			return err
+		}
+		if cleaned, err := r.ensureReclaimTargetsDeletion(ctx, instance); !cleaned || err != nil {
+			// reclaim targets deletion before remove finalizers
+			return err
+		}
+		// reclaim owner IDs in ResourceContextControl
+		if err := r.resourceContextControl.UpdateToTargetContext(ctx, instance, nil); err != nil {
+			return err
+		}
+	}
+	return clientutil.RemoveFinalizerAndUpdate(ctx, r.Client, instance, r.finalizerName)
 }
 
 func (r *xSetCommonReconciler) ensureReclaimTargetSubResources(ctx context.Context, xset api.XSetObject) error {
