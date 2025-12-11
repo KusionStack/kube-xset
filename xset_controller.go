@@ -216,8 +216,8 @@ func (r *xSetCommonReconciler) doSync(ctx context.Context, instance api.XSetObje
 		return nil, err
 	}
 
-	if instance.GetDeletionTimestamp() != nil {
-		return nil, r.ensureFinalizer(ctx, instance)
+	if xsetDeleting, err := r.ensureFinalizer(ctx, instance); xsetDeleting || err != nil {
+		return nil, err
 	}
 
 	err = r.syncControl.Replace(ctx, instance, syncContext)
@@ -236,33 +236,33 @@ func (r *xSetCommonReconciler) doSync(ctx context.Context, instance api.XSetObje
 	return scaleRequeueAfter, err
 }
 
-func (r *xSetCommonReconciler) ensureFinalizer(ctx context.Context, instance api.XSetObject) error {
+func (r *xSetCommonReconciler) ensureFinalizer(ctx context.Context, instance api.XSetObject) (bool, error) {
 	if instance.GetDeletionTimestamp() == nil {
 		if !controllerutil.ContainsFinalizer(instance, r.finalizerName) {
-			return clientutil.AddFinalizerAndUpdate(ctx, r.Client, instance, r.finalizerName)
+			return false, clientutil.AddFinalizerAndUpdate(ctx, r.Client, instance, r.finalizerName)
 		}
-		return nil
+		return false, nil
 	}
 
 	if controllerutil.ContainsFinalizer(instance, r.finalizerName) {
 		// reclaim target sub resources before remove finalizers
 		if err := r.ensureReclaimTargetSubResources(ctx, instance); err != nil {
-			return err
+			return true, err
 		}
 		// reclaim decoration ownerReferences before remove finalizers
 		if err := r.ensureReclaimOwnerReferences(ctx, instance); err != nil {
-			return err
+			return true, err
 		}
 		if cleaned, err := r.ensureReclaimTargetsDeletion(ctx, instance); !cleaned || err != nil {
 			// reclaim targets deletion before remove finalizers
-			return err
+			return true, err
 		}
 		// reclaim owner IDs in ResourceContextControl
 		if err := r.resourceContextControl.UpdateToTargetContext(ctx, instance, nil); err != nil {
-			return err
+			return true, err
 		}
 	}
-	return clientutil.RemoveFinalizerAndUpdate(ctx, r.Client, instance, r.finalizerName)
+	return true, clientutil.RemoveFinalizerAndUpdate(ctx, r.Client, instance, r.finalizerName)
 }
 
 func (r *xSetCommonReconciler) ensureReclaimTargetSubResources(ctx context.Context, xset api.XSetObject) error {
