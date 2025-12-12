@@ -247,22 +247,22 @@ func (r *xSetCommonReconciler) ensureFinalizer(ctx context.Context, instance api
 	if controllerutil.ContainsFinalizer(instance, r.finalizerName) {
 		// reclaim target sub resources before remove finalizers
 		if err := r.ensureReclaimTargetSubResources(ctx, instance); err != nil {
-			r.Recorder.Eventf(instance, corev1.EventTypeWarning, "WorkloadTerminating", "workload %s %s is deleting, ensuring subResources, i.e. pvc, are reclaimed, error: [%s]", r.meta.Kind, instance.GetName(), err)
+			r.Recorder.Eventf(instance, corev1.EventTypeWarning, "WorkloadTerminating", "workload %s %s is deleting, ensuring subResources, i.e. pvc, are reclaimed, error: [%v]", r.meta.Kind, instance.GetName(), err)
 			return true, err
 		}
 		// reclaim decoration ownerReferences before remove finalizers
 		if err := r.ensureReclaimOwnerReferences(ctx, instance); err != nil {
-			r.Recorder.Eventf(instance, corev1.EventTypeWarning, "WorkloadTerminating", "workload %s %s is deleting, ensuring ownerReferences are reclaimed, error: [%s]", r.meta.Kind, instance.GetName(), err)
+			r.Recorder.Eventf(instance, corev1.EventTypeWarning, "WorkloadTerminating", "workload %s %s is deleting, ensuring ownerReferences are reclaimed, error: [%v]", r.meta.Kind, instance.GetName(), err)
 			return true, err
 		}
 		if cleaned, err := r.ensureReclaimTargetsDeletion(ctx, instance); !cleaned || err != nil {
-			r.Recorder.Eventf(instance, corev1.EventTypeWarning, "WorkloadTerminating", "workload %s %s is deleting, ensuring all targets are cleaned [%v], error: [%s]", r.meta.Kind, instance.GetName(), cleaned, err)
+			r.Recorder.Eventf(instance, corev1.EventTypeWarning, "WorkloadTerminating", "workload %s %s is deleting, ensuring all targets are cleaned [%v], error: [%v]", r.meta.Kind, instance.GetName(), cleaned, err)
 			// reclaim targets deletion before remove finalizers
 			return true, err
 		}
 		// reclaim owner IDs in ResourceContextControl
 		if err := r.resourceContextControl.UpdateToTargetContext(ctx, instance, nil); err != nil {
-			r.Recorder.Eventf(instance, corev1.EventTypeWarning, "WorkloadTerminating", "workload %s %s is deleting, ensuring resourcecontext is reclaimed, error: [%s]", r.meta.Kind, instance.GetName(), err)
+			r.Recorder.Eventf(instance, corev1.EventTypeWarning, "WorkloadTerminating", "workload %s %s is deleting, ensuring resourcecontext is reclaimed, error: [%v]", r.meta.Kind, instance.GetName(), err)
 			return true, err
 		}
 	}
