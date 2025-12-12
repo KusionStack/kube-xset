@@ -266,6 +266,7 @@ func (r *xSetCommonReconciler) ensureFinalizer(ctx context.Context, instance api
 			return true, err
 		}
 	}
+	r.Recorder.Eventf(instance, corev1.EventTypeNormal, "WorkloadTerminating", "all pre-action are done, workload %s %s is about to deleted,", r.meta.Kind, instance.GetName())
 	return true, clientutil.RemoveFinalizerAndUpdate(ctx, r.Client, instance, r.finalizerName)
 }
 
