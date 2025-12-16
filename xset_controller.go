@@ -29,12 +29,12 @@ import (
 	"k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/apimachinery/pkg/util/clock"
 	clientutil "kusionstack.io/kube-utils/client"
+	"kusionstack.io/kube-utils/condition"
 	"kusionstack.io/kube-utils/controller/expectations"
 	"kusionstack.io/kube-utils/controller/history"
 	"kusionstack.io/kube-utils/controller/mixin"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/controller"
-	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
 	"sigs.k8s.io/controller-runtime/pkg/event"
 	"sigs.k8s.io/controller-runtime/pkg/handler"
 	"sigs.k8s.io/controller-runtime/pkg/predicate"
@@ -174,6 +174,10 @@ func (r *xSetCommonReconciler) Reconcile(ctx context.Context, req reconcile.Requ
 		return ctrl.Result{}, nil
 	}
 
+	if err := r.ensureFinalizer(ctx, instance); err != nil {
+		return ctrl.Result{}, err
+	}
+
 	// if cacheExpectation not fulfilled, shortcut this reconciling till informer cache is updated.
 	if satisfied := r.cacheExpectations.SatisfiedExpectations(req.String()); !satisfied {
 		logger.Info("not satisfied to reconcile")
@@ -216,7 +220,7 @@ func (r *xSetCommonReconciler) doSync(ctx context.Context, instance api.XSetObje
 		return nil, err
 	}
 
-	if xsetDeleting, err := r.ensureFinalizer(ctx, instance); xsetDeleting || err != nil {
+	if xsetTerminating, err := r.releaseResourcesForDeletion(ctx, instance, syncContext.NewStatus); xsetTerminating || err != nil {
 		return nil, err
 	}
 
@@ -236,37 +240,64 @@ func (r *xSetCommonReconciler) doSync(ctx context.Context, instance api.XSetObje
 	return scaleRequeueAfter, err
 }
 
-func (r *xSetCommonReconciler) ensureFinalizer(ctx context.Context, instance api.XSetObject) (bool, error) {
+func (r *xSetCommonReconciler) ensureFinalizer(ctx context.Context, instance api.XSetObject) error {
+	logger := logr.FromContext(ctx)
 	if instance.GetDeletionTimestamp() == nil {
-		if !controllerutil.ContainsFinalizer(instance, r.finalizerName) {
-			return false, clientutil.AddFinalizerAndUpdate(ctx, r.Client, instance, r.finalizerName)
+		// ensure finalizer
+		if err := clientutil.AddFinalizerAndUpdate(ctx, r.Client, instance, r.finalizerName); err != nil {
+			r.Recorder.Eventf(instance, corev1.EventTypeWarning, "FailedAddFinalizer", fmt.Sprintf("failed to add finalizer %s, err: %v", r.finalizerName, err))
+			return err
 		}
+		return nil
+	}
+	status := r.XSetController.GetXSetStatus(instance)
+	terminatingCond := condition.GetCondition(status.Conditions, string(api.XSetTerminating))
+	if terminatingCond != nil &&
+		terminatingCond.Status == metav1.ConditionTrue &&
+		terminatingCond.Reason == "Deleted" {
+		// remove finalizer
+		if err := clientutil.RemoveFinalizerAndUpdate(ctx, r.Client, instance, r.finalizerName); err != nil {
+			r.Recorder.Eventf(instance, corev1.EventTypeWarning, "FailedRemoveFinalizer", fmt.Sprintf("failed to remove finalizer %s, err: %v", r.finalizerName, err))
+			return err
+		}
+		logger.Info("clean up finalizer", "finalizer", r.finalizerName)
+	}
+	return nil
+}
+
+func (r *xSetCommonReconciler) releaseResourcesForDeletion(ctx context.Context, instance api.XSetObject, newStatus *api.XSetStatus) (bool, error) {
+	if instance.GetDeletionTimestamp() == nil {
 		return false, nil
 	}
 
-	if controllerutil.ContainsFinalizer(instance, r.finalizerName) {
-		// reclaim target sub resources before remove finalizers
-		if err := r.ensureReclaimTargetSubResources(ctx, instance); err != nil {
-			r.Recorder.Eventf(instance, corev1.EventTypeWarning, "WorkloadTerminating", "workload %s %s is deleting, ensuring subResources, i.e. pvc, are reclaimed, error: [%v]", r.meta.Kind, instance.GetName(), err)
-			return true, err
-		}
-		// reclaim decoration ownerReferences before remove finalizers
-		if err := r.ensureReclaimOwnerReferences(ctx, instance); err != nil {
-			r.Recorder.Eventf(instance, corev1.EventTypeWarning, "WorkloadTerminating", "workload %s %s is deleting, ensuring ownerReferences are reclaimed, error: [%v]", r.meta.Kind, instance.GetName(), err)
-			return true, err
-		}
-		if cleaned, err := r.ensureReclaimTargetsDeletion(ctx, instance); !cleaned || err != nil {
-			r.Recorder.Eventf(instance, corev1.EventTypeWarning, "WorkloadTerminating", "workload %s %s is deleting, ensuring all targets are cleaned [%v], error: [%v]", r.meta.Kind, instance.GetName(), cleaned, err)
-			// reclaim targets deletion before remove finalizers
-			return true, err
-		}
-		// reclaim owner IDs in ResourceContextControl
-		if err := r.resourceContextControl.UpdateToTargetContext(ctx, instance, nil); err != nil {
-			r.Recorder.Eventf(instance, corev1.EventTypeWarning, "WorkloadTerminating", "workload %s %s is deleting, ensuring resourcecontext is reclaimed, error: [%v]", r.meta.Kind, instance.GetName(), err)
-			return true, err
-		}
+	// reclaim target sub resources before remove finalizers
+	if err := r.ensureReclaimTargetSubResources(ctx, instance); err != nil {
+		synccontrols.AddOrUpdateCondition(newStatus, api.XSetTerminating, err, "ReclaimSubResourcesFailed", err.Error())
+		return true, err
 	}
-	r.Recorder.Eventf(instance, corev1.EventTypeNormal, "WorkloadTerminating", "all pre-action are done, workload %s %s is about to deleted,", r.meta.Kind, instance.GetName())
+
+	// reclaim decoration ownerReferences before remove finalizers
+	if err := r.ensureReclaimOwnerReferences(ctx, instance); err != nil {
+		synccontrols.AddOrUpdateCondition(newStatus, api.XSetTerminating, err, "ReclaimOwnerReferencesFailed", err.Error())
+		return true, err
+	}
+
+	// reclaim targets deletion before remove finalizers
+	if cleaned, err := r.ensureReclaimTargetsDeletion(ctx, instance); err != nil {
+		synccontrols.AddOrUpdateCondition(newStatus, api.XSetTerminating, err, "ReclaimTargetsDeletionFailed", err.Error())
+		return true, err
+	} else if !cleaned {
+		synccontrols.AddOrUpdateCondition(newStatus, api.XSetTerminating, errors.New("deleting targets"), "ReclaimingTargetsDeletion", fmt.Sprintf("waiting for all %s deleted", r.XSetController.XMeta().Kind))
+		return true, nil
+	}
+
+	// reclaim owner IDs in ResourceContextControl
+	if err := r.resourceContextControl.UpdateToTargetContext(ctx, instance, nil); err != nil {
+		synccontrols.AddOrUpdateCondition(newStatus, api.XSetTerminating, err, "ReclaimResourceContext", err.Error())
+		return true, err
+	}
+
+	synccontrols.AddOrUpdateCondition(newStatus, api.XSetTerminating, nil, "Released", "")
 	return true, clientutil.RemoveFinalizerAndUpdate(ctx, r.Client, instance, r.finalizerName)
 }
 
