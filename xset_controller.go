@@ -298,7 +298,7 @@ func (r *xSetCommonReconciler) releaseResourcesForDeletion(ctx context.Context, 
 	}
 
 	synccontrols.AddOrUpdateCondition(newStatus, api.XSetTerminating, nil, "Released", "")
-	return true, clientutil.RemoveFinalizerAndUpdate(ctx, r.Client, instance, r.finalizerName)
+	return true, nil
 }
 
 func (r *xSetCommonReconciler) ensureReclaimTargetSubResources(ctx context.Context, xset api.XSetObject) error {
