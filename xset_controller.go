@@ -297,7 +297,7 @@ func (r *xSetCommonReconciler) releaseResourcesForDeletion(ctx context.Context, 
 		return true, err
 	}
 
-	synccontrols.AddOrUpdateCondition(newStatus, api.XSetTerminating, nil, "Released", "")
+	synccontrols.AddOrUpdateCondition(newStatus, api.XSetTerminating, nil, "Deleted", "")
 	return true, nil
 }
 
