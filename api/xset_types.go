@@ -25,8 +25,9 @@ import (
 type XSetConditionType string
 
 const (
-	XSetScale  XSetConditionType = "Scale"
-	XSetUpdate XSetConditionType = "Update"
+	XSetScale       XSetConditionType = "Scale"
+	XSetUpdate      XSetConditionType = "Update"
+	XSetTerminating XSetConditionType = "Terminating"
 )
 
 type XSetSpec struct {
