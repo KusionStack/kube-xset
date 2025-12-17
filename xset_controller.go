@@ -220,8 +220,8 @@ func (r *xSetCommonReconciler) doSync(ctx context.Context, instance api.XSetObje
 		return nil, err
 	}
 
-	if xsetTerminating, err := r.releaseResourcesForDeletion(ctx, instance, syncContext.NewStatus); xsetTerminating || err != nil {
-		return nil, err
+	if instance.GetDeletionTimestamp() != nil {
+		return nil, r.releaseResourcesForDeletion(ctx, instance, syncContext.NewStatus)
 	}
 
 	err = r.syncControl.Replace(ctx, instance, syncContext)
@@ -265,40 +265,40 @@ func (r *xSetCommonReconciler) ensureFinalizer(ctx context.Context, instance api
 	return nil
 }
 
-func (r *xSetCommonReconciler) releaseResourcesForDeletion(ctx context.Context, instance api.XSetObject, newStatus *api.XSetStatus) (bool, error) {
+func (r *xSetCommonReconciler) releaseResourcesForDeletion(ctx context.Context, instance api.XSetObject, newStatus *api.XSetStatus) error {
 	if instance.GetDeletionTimestamp() == nil {
-		return false, nil
+		return nil
 	}
 
 	// reclaim target sub resources before remove finalizers
 	if err := r.ensureReclaimTargetSubResources(ctx, instance); err != nil {
 		synccontrols.AddOrUpdateCondition(newStatus, api.XSetTerminating, err, "ReclaimSubResourcesFailed", err.Error())
-		return true, err
+		return err
 	}
 
 	// reclaim decoration ownerReferences before remove finalizers
 	if err := r.ensureReclaimOwnerReferences(ctx, instance); err != nil {
 		synccontrols.AddOrUpdateCondition(newStatus, api.XSetTerminating, err, "ReclaimOwnerReferencesFailed", err.Error())
-		return true, err
+		return err
 	}
 
 	// reclaim targets deletion before remove finalizers
 	if cleaned, err := r.ensureReclaimTargetsDeletion(ctx, instance); err != nil {
 		synccontrols.AddOrUpdateCondition(newStatus, api.XSetTerminating, err, "ReclaimTargetsDeletionFailed", err.Error())
-		return true, err
+		return err
 	} else if !cleaned {
 		synccontrols.AddOrUpdateCondition(newStatus, api.XSetTerminating, errors.New("deleting targets"), "ReclaimingTargetsDeletion", fmt.Sprintf("waiting for all %s deleted", r.XSetController.XMeta().Kind))
-		return true, nil
+		return nil
 	}
 
 	// reclaim owner IDs in ResourceContextControl
 	if err := r.resourceContextControl.UpdateToTargetContext(ctx, instance, nil); err != nil {
 		synccontrols.AddOrUpdateCondition(newStatus, api.XSetTerminating, err, "ReclaimResourceContext", err.Error())
-		return true, err
+		return err
 	}
 
 	synccontrols.AddOrUpdateCondition(newStatus, api.XSetTerminating, nil, "Deleted", "")
-	return true, nil
+	return nil
 }
 
 func (r *xSetCommonReconciler) ensureReclaimTargetSubResources(ctx context.Context, xset api.XSetObject) error {
