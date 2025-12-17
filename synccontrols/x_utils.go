@@ -22,10 +22,10 @@ import (
 	"time"
 
 	appsv1 "k8s.io/api/apps/v1"
+	"k8s.io/apimachinery/pkg/api/meta"
 	apimachineryvalidation "k8s.io/apimachinery/pkg/api/validation"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	clientutils "kusionstack.io/kube-utils/client"
-	"kusionstack.io/kube-utils/condition"
 	controllerutils "kusionstack.io/kube-utils/controller/utils"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
@@ -69,7 +69,7 @@ func AddOrUpdateCondition(status *api.XSetStatus, conditionType api.XSetConditio
 		condStatus = metav1.ConditionFalse
 	}
 
-	existCond := condition.GetCondition(status.Conditions, string(conditionType))
+	existCond := meta.FindStatusCondition(status.Conditions, string(conditionType))
 	if existCond != nil && existCond.Reason == reason && existCond.Status == condStatus {
 		now := metav1.Now()
 		if now.Sub(existCond.LastTransitionTime.Time) < ConditionUpdatePeriodBackOff || existCond.Message == message {
@@ -77,10 +77,19 @@ func AddOrUpdateCondition(status *api.XSetStatus, conditionType api.XSetConditio
 		}
 	}
 
-	cond := condition.NewCondition(string(conditionType), condStatus, reason, message)
-	status.Conditions = condition.SetCondition(status.Conditions, *cond)
+	cond := &metav1.Condition{
+		Type:               string(conditionType),
+		Status:             condStatus,
+		LastTransitionTime: metav1.Now(),
+		Reason:             reason,
+		Message:            message,
+	}
+	if status.Conditions == nil {
+		status.Conditions = []metav1.Condition{}
+	}
+	meta.SetStatusCondition(&status.Conditions, *cond)
 
-	// update last transition time
+	// we must update last transition time if reason changed but status not changed
 	for i := range status.Conditions {
 		c := status.Conditions[i]
 		if c.Type == string(conditionType) {

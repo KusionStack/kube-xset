@@ -25,11 +25,11 @@ import (
 	"github.com/go-logr/logr"
 	corev1 "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
+	"k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/apimachinery/pkg/util/clock"
 	clientutil "kusionstack.io/kube-utils/client"
-	"kusionstack.io/kube-utils/condition"
 	"kusionstack.io/kube-utils/controller/expectations"
 	"kusionstack.io/kube-utils/controller/history"
 	"kusionstack.io/kube-utils/controller/mixin"
@@ -251,7 +251,7 @@ func (r *xSetCommonReconciler) ensureFinalizer(ctx context.Context, instance api
 		return nil
 	}
 	status := r.XSetController.GetXSetStatus(instance)
-	terminatingCond := condition.GetCondition(status.Conditions, string(api.XSetTerminating))
+	terminatingCond := meta.FindStatusCondition(status.Conditions, string(api.XSetTerminating))
 	if terminatingCond != nil &&
 		terminatingCond.Status == metav1.ConditionTrue &&
 		terminatingCond.Reason == "Deleted" {
