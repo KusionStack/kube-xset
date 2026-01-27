@@ -83,8 +83,8 @@ func NewRealSyncControl(reconcileMixIn *mixin.ReconcilerMixin,
 		ResourceContextControl: resourceContexts,
 		Recorder:               reconcileMixIn.Recorder,
 
-		scaleInLifecycleAdapter: scaleInOpsLifecycleAdapter,
-		updateLifecycleAdapter:  updateLifecycleAdapter,
+		ScaleInLifecycleAdapter: scaleInOpsLifecycleAdapter,
+		UpdateLifecycleAdapter:  updateLifecycleAdapter,
 		CacheExpectations:       cacheExpectations,
 		TargetGVK:               targetGVK,
 	}

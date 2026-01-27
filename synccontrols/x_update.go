@@ -315,8 +315,8 @@ type UpdateConfig struct {
 	ResourceContextControl resourcecontexts.ResourceContextControl
 	Recorder               record.EventRecorder
 
-	scaleInLifecycleAdapter api.LifecycleAdapter
-	updateLifecycleAdapter  api.LifecycleAdapter
+	ScaleInLifecycleAdapter api.LifecycleAdapter
+	UpdateLifecycleAdapter  api.LifecycleAdapter
 
 	CacheExpectations expectations.CacheExpectationsInterface
 	TargetGVK         schema.GroupVersionKind
@@ -392,7 +392,7 @@ func (u *GenericTargetUpdater) BeginUpdateTarget(ctx context.Context, syncContex
 		targetInfo := <-targetCh
 		u.Recorder.Eventf(targetInfo.Object, corev1.EventTypeNormal, "TargetUpdateLifecycle", "try to begin TargetOpsLifecycle for updating Target of XSet")
 
-		if updated, err := opslifecycle.BeginWithCleaningOld(ctx, u.XsetLabelAnnoMgr, u.Client, u.updateLifecycleAdapter, targetInfo.Object, func(obj client.Object) (bool, error) {
+		if updated, err := opslifecycle.BeginWithCleaningOld(ctx, u.XsetLabelAnnoMgr, u.Client, u.UpdateLifecycleAdapter, targetInfo.Object, func(obj client.Object) (bool, error) {
 			if !targetInfo.OnlyMetadataChanged && !targetInfo.InPlaceUpdateSupport {
 				return opslifecycle.WhenBeginDelete(u.XsetLabelAnnoMgr, obj)
 			}
@@ -489,11 +489,11 @@ func (u *GenericTargetUpdater) FilterAllowOpsTargets(ctx context.Context, candid
 func (u *GenericTargetUpdater) FinishUpdateTarget(ctx context.Context, targetInfo *TargetUpdateInfo, finishByCancelUpdate bool) error {
 	if finishByCancelUpdate {
 		// cancel update lifecycle
-		return opslifecycle.CancelOpsLifecycle(ctx, u.XsetLabelAnnoMgr, u.Client, u.updateLifecycleAdapter, targetInfo.Object)
+		return opslifecycle.CancelOpsLifecycle(ctx, u.XsetLabelAnnoMgr, u.Client, u.UpdateLifecycleAdapter, targetInfo.Object)
 	}
 
 	// target is ops finished, finish the lifecycle gracefully
-	if updated, err := opslifecycle.Finish(ctx, u.XsetLabelAnnoMgr, u.Client, u.updateLifecycleAdapter, targetInfo.Object); err != nil {
+	if updated, err := opslifecycle.Finish(ctx, u.XsetLabelAnnoMgr, u.Client, u.UpdateLifecycleAdapter, targetInfo.Object); err != nil {
 		return fmt.Errorf("failed to finish TargetOpsLifecycle for updating Target %s/%s: %w", targetInfo.GetNamespace(), targetInfo.GetName(), err)
 	} else if updated {
 		// add an expectation for this target update, before next reconciling
