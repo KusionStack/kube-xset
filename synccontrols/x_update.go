@@ -336,7 +336,7 @@ var NewInPlaceOnlyPossibleUpdaterFunc func() TargetUpdater
 
 // RegisterInPlaceOnlyUpdater Support users to define inPlaceOnlyTargetUpdater and register through RegisterInPlaceOnlyUpdater
 func RegisterInPlaceOnlyUpdater(f func() TargetUpdater) {
-	NewInPlaceIfPossibleUpdaterFunc = f
+	NewInPlaceOnlyPossibleUpdaterFunc = f
 }
 
 var NewInPlaceIfPossibleUpdaterFunc func() TargetUpdater
