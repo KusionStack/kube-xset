@@ -332,11 +332,11 @@ type TargetUpdater interface {
 	FinishUpdateTarget(ctx context.Context, targetInfo *TargetUpdateInfo, finishByCancelUpdate bool) error
 }
 
-var NewInPlaceOnlyPossibleUpdaterFunc func() TargetUpdater
+var NewInPlaceOnlyUpdaterFunc func() TargetUpdater
 
 // RegisterInPlaceOnlyUpdater Support users to define inPlaceOnlyTargetUpdater and register through RegisterInPlaceOnlyUpdater
 func RegisterInPlaceOnlyUpdater(f func() TargetUpdater) {
-	NewInPlaceOnlyPossibleUpdaterFunc = f
+	NewInPlaceOnlyUpdaterFunc = f
 }
 
 var NewInPlaceIfPossibleUpdaterFunc func() TargetUpdater
@@ -353,8 +353,8 @@ func (r *RealSyncControl) newTargetUpdater(xset api.XSetObject) TargetUpdater {
 	case api.XSetRecreateTargetUpdateStrategyType:
 		targetUpdater = &recreateTargetUpdater{}
 	case api.XSetInPlaceOnlyTargetUpdateStrategyType:
-		if NewInPlaceOnlyPossibleUpdaterFunc != nil {
-			targetUpdater = NewInPlaceOnlyPossibleUpdaterFunc()
+		if NewInPlaceOnlyUpdaterFunc != nil {
+			targetUpdater = NewInPlaceOnlyUpdaterFunc()
 		} else if NewInPlaceIfPossibleUpdaterFunc != nil {
 			// In case of using native K8s, Target is only allowed to update with container image, so InPlaceOnly policy is
 			// implemented with InPlaceIfPossible policy as default for compatibility.
