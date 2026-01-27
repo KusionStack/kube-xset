@@ -147,6 +147,10 @@ func (r *RealSyncControl) SyncTargets(ctx context.Context, instance api.XSetObje
 		syncContext.FilteredTarget = filteredTargets
 	}
 
+	if instance.GetDeletionTimestamp() != nil {
+		return false, nil
+	}
+
 	// sync subresource
 	// 1. list pvcs using ownerReference
 	// 2. adopt and retain orphaned pvcs according to PVC retention policy
@@ -904,10 +908,9 @@ func (r *RealSyncControl) CalculateStatus(_ context.Context, instance api.XSetOb
 
 	var readyReplicas, scheduledReplicas, replicas, terminatingReplicas, updatedReplicas, operatingReplicas, updatedReadyReplicas, availableReplicas, updatedAvailableReplicas int32
 
-	activeTargets := FilterOutActiveTargetWrappers(syncContext.TargetWrappers)
-	for _, targetWrapper := range activeTargets {
+	for _, target := range syncContext.FilteredTarget {
 		// for naming with persistent sequences suffix, terminating targets can be shown in status
-		if targetWrapper.GetDeletionTimestamp() != nil {
+		if target.GetDeletionTimestamp() != nil {
 			terminatingReplicas++
 			if !IsTargetNamingSuffixPolicyPersistentSequence(r.xsetController.GetXSetSpec(instance)) {
 				continue
@@ -917,30 +920,30 @@ func (r *RealSyncControl) CalculateStatus(_ context.Context, instance api.XSetOb
 		replicas++
 
 		isUpdated := false
-		if isUpdated = IsTargetUpdatedRevision(targetWrapper.Object, syncContext.UpdatedRevision.Name); isUpdated {
+		if isUpdated = IsTargetUpdatedRevision(target, syncContext.UpdatedRevision.Name); isUpdated {
 			updatedReplicas++
 		}
 
-		if opslifecycle.IsDuringOps(r.updateConfig.XsetLabelAnnoMgr, r.scaleInLifecycleAdapter, targetWrapper) ||
-			opslifecycle.IsDuringOps(r.updateConfig.XsetLabelAnnoMgr, r.updateLifecycleAdapter, targetWrapper) {
+		if opslifecycle.IsDuringOps(r.updateConfig.XsetLabelAnnoMgr, r.scaleInLifecycleAdapter, target) ||
+			opslifecycle.IsDuringOps(r.updateConfig.XsetLabelAnnoMgr, r.updateLifecycleAdapter, target) {
 			operatingReplicas++
 		}
 
-		if ready, _ := r.xsetController.CheckReadyTime(targetWrapper.Object); ready {
+		if ready, _ := r.xsetController.CheckReadyTime(target); ready {
 			readyReplicas++
 			if isUpdated {
 				updatedReadyReplicas++
 			}
 		}
 
-		if r.xsetController.CheckAvailable(targetWrapper.Object) {
+		if r.xsetController.CheckAvailable(target) {
 			availableReplicas++
 			if isUpdated {
 				updatedAvailableReplicas++
 			}
 		}
 
-		if r.xsetController.CheckScheduled(targetWrapper.Object) {
+		if r.xsetController.CheckScheduled(target) {
 			scheduledReplicas++
 		}
 	}
