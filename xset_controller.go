@@ -351,7 +351,7 @@ func (r *xSetCommonReconciler) ensureReclaimTargetsDeletion(ctx context.Context,
 	for i := range targets {
 		target := targets[i]
 		if target.GetDeletionTimestamp() == nil {
-			r.Recorder.Eventf(instance, corev1.EventTypeNormal, "TargetsDeleted", "waiting for models to be deleted gracefully before xset deleted %s/%s", instance.GetNamespace(), instance.GetName())
+			r.Recorder.Eventf(instance, corev1.EventTypeNormal, "TargetsDeleted", "waiting for %s to be deleted gracefully before xset deleted %s/%s", instance.GetObjectKind(), instance.GetNamespace(), instance.GetName())
 			return false, r.syncControl.BatchDeleteTargetsByLabel(ctx, r.targetControl, targets)
 		}
 	}
