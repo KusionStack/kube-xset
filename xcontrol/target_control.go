@@ -22,10 +22,12 @@ import (
 	"fmt"
 	"reflect"
 
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/fields"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/runtime/schema"
+	"k8s.io/apimachinery/pkg/types"
 	"kusionstack.io/kube-utils/controller/mixin"
 	refmanagerutil "kusionstack.io/kube-utils/controller/refmanager"
 	"sigs.k8s.io/controller-runtime/pkg/cache"
@@ -110,6 +112,14 @@ func (r *targetControl) GetFilteredTargets(ctx context.Context, selector *metav1
 
 func (r *targetControl) CreateTarget(ctx context.Context, target client.Object) (client.Object, error) {
 	if err := r.client.Create(ctx, target); err != nil {
+		// If the target already exists, get and return the existing one
+		if apierrors.IsAlreadyExists(err) {
+			existingTarget := target.DeepCopyObject().(client.Object)
+			if getErr := r.client.Get(ctx, types.NamespacedName{Namespace: target.GetNamespace(), Name: target.GetName()}, existingTarget); getErr != nil {
+				return nil, fmt.Errorf("failed to create target and failed to get existing target: %w, %w", err, getErr)
+			}
+			return existingTarget, nil
+		}
 		return nil, fmt.Errorf("failed to create target: %w", err)
 	}
 	return target, nil

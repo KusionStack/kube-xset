@@ -582,13 +582,19 @@ func (r *RealSyncControl) Scale(ctx context.Context, xsetObject api.XSetObject, 
 						return fmt.Errorf("fail to create PVCs for target %s: %w", target.GetName(), err)
 					}
 				}
+				// set expectation BEFORE creating target to prevent race condition
+				// where multiple reconciles try to create the same target
+				if err := r.cacheExpectations.ExpectCreation(clientutil.ObjectKeyString(xsetObject), r.targetGVK, target.GetNamespace(), target.GetName()); err != nil {
+					return fmt.Errorf("fail to set creation expectation for target %s: %w", target.GetName(), err)
+				}
 				newTarget := target.DeepCopyObject().(client.Object)
 				logger.Info("try to create Target with revision of "+r.xsetGVK.Kind, "revision", revision.GetName())
 				if target, err = r.xControl.CreateTarget(ctx, newTarget); err != nil {
+					// delete expectation if create failed
+					r.cacheExpectations.DeleteExpectations(clientutil.ObjectKeyString(xsetObject))
 					return err
 				}
-				// add an expectation for this target creation, before next reconciling
-				return r.cacheExpectations.ExpectCreation(clientutil.ObjectKeyString(xsetObject), r.targetGVK, target.GetNamespace(), target.GetName())
+				return nil
 			})
 			if needUpdateContext.Load() {
 				logger.Info("try to update ResourceContext for XSet after scaling out", "Context", syncContext.OwnedIds)
