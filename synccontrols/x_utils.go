@@ -38,6 +38,15 @@ func NewTargetFrom(setController api.XSetController, xsetLabelAnnoMgr api.XSetLa
 		return nil, err
 	}
 
+	// Apply XObjectCreationAdapter hook if implemented
+	if adapter, ok := setController.(api.XObjectCreationAdapter); ok {
+		if hook := adapter.GetXObjectCreationPatcher(owner, revision); hook != nil {
+			if err := hook(targetObj); err != nil {
+				return nil, err
+			}
+		}
+	}
+
 	meta := setController.XSetMeta()
 	ownerRef := metav1.NewControllerRef(owner, meta.GroupVersionKind())
 	targetObj.SetOwnerReferences(append(targetObj.GetOwnerReferences(), *ownerRef))

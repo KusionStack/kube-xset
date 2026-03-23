@@ -47,6 +47,7 @@ type XSetController interface {
 	// 		- LabelAnnotationManagerGetter
 	// 		- SubResourcePvcAdapter
 	// 		- DecorationAdapter
+	// 		- XObjectCreationAdapter
 }
 
 type XSetObject client.Object
@@ -120,4 +121,15 @@ type DecorationAdapter interface {
 	GetDecorationPatcherByRevisions(ctx context.Context, c client.Client, target client.Object, revision string) (func(client.Object) error, error)
 	// IsTargetDecorationChanged returns true if decoration on target is changed.
 	IsTargetDecorationChanged(currentRevision, updatedRevision string) (bool, error)
+}
+
+// XObjectCreationAdapter provides hooks for X object creation lifecycle.
+// Controllers can implement this interface to inject custom logic during target creation
+// after GetXObjectFromRevision is called. This allows controllers to modify the X object
+// with custom labels, annotations, spec changes, etc. before it is persisted.
+type XObjectCreationAdapter interface {
+	// GetXObjectCreationPatcher returns a function that will be called to patch the X object
+	// after it is created from revision and before it is persisted.
+	// Return nil if no patching is needed.
+	GetXObjectCreationPatcher(owner XSetObject, revision *appsv1.ControllerRevision) func(client.Object) error
 }
