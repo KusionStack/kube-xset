@@ -29,7 +29,6 @@ import (
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/util/rand"
 	"k8s.io/apimachinery/pkg/util/sets"
-	appsv1alpha1 "kusionstack.io/kube-api/apps/v1alpha1"
 	kubeutilclient "kusionstack.io/kube-utils/client"
 	"kusionstack.io/kube-utils/controller/expectations"
 	"kusionstack.io/kube-utils/controller/mixin"
@@ -344,10 +343,11 @@ func (pc *RealPvcControl) IsTargetPvcTmpChanged(xset api.XSetObject, x client.Ob
 		if pvcId != targetId {
 			continue
 		}
-		if _, exist := pc.xsetLabelAnnoMgr.Get(pvc, api.SubResourcePvcTemplateHashLabelKey); !exist {
+		if v, exist := pc.xsetLabelAnnoMgr.Get(pvc, api.SubResourcePvcTemplateHashLabelKey); !exist {
 			continue
+		} else {
+			existingPvcHash[pvc.Name] = v
 		}
-		existingPvcHash[pvc.Name] = pvc.Labels[appsv1alpha1.PvcTemplateHashLabelKey]
 	}
 
 	// check mounted pvcs changed
