@@ -1059,6 +1059,7 @@ func targetDuringReplace(labelMgr api.XSetLabelAnnotationManager, target client.
 
 // BatchDeleteTargetsByLabel triggers target deletion following the same lifecycle pattern as scale-in.
 // It triggers TargetOpsLifecycle, waits for permission, then directly deletes the targets.
+// Note: PVC cleanup is handled separately by ensureReclaimPvcs in xset_controller.go.
 func (r *RealSyncControl) BatchDeleteTargetsByLabel(ctx context.Context, targetControl xcontrol.TargetControl, needDeleteTargets []client.Object) error {
 	logger := logr.FromContext(ctx)
 
@@ -1119,19 +1120,6 @@ func (r *RealSyncControl) BatchDeleteTargetsByLabel(ctx context.Context, targetC
 		r.Recorder.Eventf(target, corev1.EventTypeNormal, "TargetDeleted", "succeed to delete target for XSet deletion")
 		if err := r.cacheExpectations.ExpectDeletion(clientutil.ObjectKeyString(target), r.targetGVK, target.GetNamespace(), target.GetName()); err != nil {
 			return err
-		}
-
-		// Clean up PVCs if needed (same logic as scale-in)
-		if _, enabled := subresources.GetSubresourcePvcAdapter(r.xsetController); enabled {
-			_, replaceOrigin := r.xsetLabelAnnoMgr.Get(target, api.XReplacePairOriginName)
-			_, replaceNew := r.xsetLabelAnnoMgr.Get(target, api.XReplacePairNewId)
-			if replaceOrigin || replaceNew || !r.pvcControl.RetainPvcWhenXSetDeleted(r.xsetController.NewXSetObject()) {
-				// Note: For deletion, we don't have syncContext.ExistingPvcs, so pass nil
-				// The pvcControl should handle this case
-				if err := r.pvcControl.DeleteTargetPvcs(ctx, r.xsetController.NewXSetObject(), target, nil); err != nil {
-					logger.Error(err, "failed to delete target PVCs", "target", ObjectKeyString(target))
-				}
-			}
 		}
 
 		return nil
