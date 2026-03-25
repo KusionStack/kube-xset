@@ -1057,16 +1057,83 @@ func targetDuringReplace(labelMgr api.XSetLabelAnnotationManager, target client.
 	return replaceIndicate || replaceOriginTarget || replaceNewTarget
 }
 
-// BatchDeleteTargetsByLabel try to trigger target deletion by to-delete label
+// BatchDeleteTargetsByLabel triggers target deletion following the same lifecycle pattern as scale-in.
+// It triggers TargetOpsLifecycle, waits for permission, then directly deletes the targets.
 func (r *RealSyncControl) BatchDeleteTargetsByLabel(ctx context.Context, targetControl xcontrol.TargetControl, needDeleteTargets []client.Object) error {
+	logger := logr.FromContext(ctx)
+
+	// Step 1: Trigger TargetOpsLifecycle for targets not already in lifecycle
 	_, err := controllerutils.SlowStartBatch(len(needDeleteTargets), controllerutils.SlowStartInitialBatchSize, false, func(i int, _ error) error {
 		target := needDeleteTargets[i]
-		if _, exist := r.xsetLabelAnnoMgr.Get(target, api.XDeletionIndicationLabelKey); !exist {
-			patch := client.RawPatch(types.MergePatchType, []byte(fmt.Sprintf(`{"metadata":{"labels":{"%s":"%d"}}}`, r.xsetLabelAnnoMgr.Value(api.XDeletionIndicationLabelKey), time.Now().UnixNano()))) // nolint
-			if err := targetControl.PatchTarget(ctx, target, patch); err != nil {
-				return fmt.Errorf("failed to delete target when syncTargets %s/%s/%w", target.GetNamespace(), target.GetName(), err)
+
+		// Skip if already being deleted
+		if target.GetDeletionTimestamp() != nil {
+			return nil
+		}
+
+		// Check if already during scale-in ops (has preparing-delete label)
+		if _, duringOps := r.xsetLabelAnnoMgr.Get(target, api.PreparingDeleteLabel); duringOps {
+			return nil
+		}
+
+		// Trigger TargetOpsLifecycle with scaleIn OperationType
+		logger.V(1).Info("try to begin TargetOpsLifecycle for deleting Target in XSet", "target", ObjectKeyString(target))
+		if updated, err := opslifecycle.Begin(ctx, r.xsetLabelAnnoMgr, r.Client, r.scaleInLifecycleAdapter, target); err != nil {
+			return fmt.Errorf("fail to begin TargetOpsLifecycle for deleting Target %s/%s: %w", target.GetNamespace(), target.GetName(), err)
+		} else if updated {
+			r.Recorder.Eventf(target, corev1.EventTypeNormal, "BeginDeleteLifecycle", "succeed to begin TargetOpsLifecycle for deletion")
+			// add an expectation for this target update, before next reconciling
+			if err := r.cacheExpectations.ExpectUpdation(clientutil.ObjectKeyString(target), r.targetGVK, target.GetNamespace(), target.GetName(), target.GetResourceVersion()); err != nil {
+				return err
 			}
 		}
+
+		return nil
+	})
+	if err != nil {
+		return err
+	}
+
+	// Step 2: Check AllowOps and delete targets that are allowed
+	_, err = controllerutils.SlowStartBatch(len(needDeleteTargets), controllerutils.SlowStartInitialBatchSize, false, func(i int, _ error) error {
+		target := needDeleteTargets[i]
+
+		// Skip if already being deleted
+		if target.GetDeletionTimestamp() != nil {
+			return nil
+		}
+
+		// Check if operation is allowed (no delay for deletion, pass 0)
+		_, allowed := opslifecycle.AllowOps(r.xsetLabelAnnoMgr, r.scaleInLifecycleAdapter, 0, target)
+		if !allowed {
+			logger.V(1).Info("target not yet allowed to delete, waiting for lifecycle", "target", ObjectKeyString(target))
+			return nil
+		}
+
+		// Delete the target
+		logger.Info("deleting target for XSet deletion", "target", ObjectKeyString(target))
+		if err := targetControl.DeleteTarget(ctx, target); err != nil {
+			return fmt.Errorf("failed to delete target %s/%s: %w", target.GetNamespace(), target.GetName(), err)
+		}
+
+		r.Recorder.Eventf(target, corev1.EventTypeNormal, "TargetDeleted", "succeed to delete target for XSet deletion")
+		if err := r.cacheExpectations.ExpectDeletion(clientutil.ObjectKeyString(target), r.targetGVK, target.GetNamespace(), target.GetName()); err != nil {
+			return err
+		}
+
+		// Clean up PVCs if needed (same logic as scale-in)
+		if _, enabled := subresources.GetSubresourcePvcAdapter(r.xsetController); enabled {
+			_, replaceOrigin := r.xsetLabelAnnoMgr.Get(target, api.XReplacePairOriginName)
+			_, replaceNew := r.xsetLabelAnnoMgr.Get(target, api.XReplacePairNewId)
+			if replaceOrigin || replaceNew || !r.pvcControl.RetainPvcWhenXSetDeleted(r.xsetController.NewXSetObject()) {
+				// Note: For deletion, we don't have syncContext.ExistingPvcs, so pass nil
+				// The pvcControl should handle this case
+				if err := r.pvcControl.DeleteTargetPvcs(ctx, r.xsetController.NewXSetObject(), target, nil); err != nil {
+					logger.Error(err, "failed to delete target PVCs", "target", ObjectKeyString(target))
+				}
+			}
+		}
+
 		return nil
 	})
 	return err
