@@ -90,9 +90,6 @@ func (p *PvcSubResourceAdapter) BuildResource(
 	}
 
 	pvc = pvc.DeepCopy()
-
-	baseName := fmt.Sprintf("%s-%s-%s", xset.GetName(), template.Name, targetID)
-	pvc.Name = p.truncator.Truncate(baseName)
 	pvc.Namespace = xset.GetNamespace()
 
 	xsetMeta := p.xsetController.XSetMeta()

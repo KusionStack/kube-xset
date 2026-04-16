@@ -535,6 +535,13 @@ func (sc *RealSubResourceControl) createResourcesForAdapter(ctx context.Context,
 			return fmt.Errorf("failed to build %s from template %s: %w", gvk.Kind, template.Name, err)
 		}
 
+		// Set GenerateName with prefix (allows adapter to override prefix)
+		var prefixOverride string
+		if pg, ok := adapter.(api.SubResourcePrefixGetter); ok {
+			prefixOverride = pg.GetSubResourcePrefix(xset, template)
+		}
+		resource.SetGenerateName(GetSubResourcePrefix(prefixOverride, xset.GetName(), template.Name))
+
 		if err := sc.client.Create(ctx, resource); err != nil {
 			if apierrors.IsAlreadyExists(err) {
 				// Resource already exists — fetch and check state

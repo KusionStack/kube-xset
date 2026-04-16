@@ -78,9 +78,6 @@ func (s *ServiceSubResourceAdapter) BuildResource(
 	}
 
 	svc = svc.DeepCopy()
-
-	baseName := fmt.Sprintf("%s-%s-%s", xset.GetName(), template.Name, targetID)
-	svc.Name = s.truncator.Truncate(baseName)
 	svc.Namespace = xset.GetNamespace()
 
 	svc.OwnerReferences = []metav1.OwnerReference{
