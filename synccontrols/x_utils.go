@@ -102,8 +102,23 @@ func AddOrUpdateCondition(status *api.XSetStatus, conditionType api.XSetConditio
 func GetTargetsPrefix(controllerName string) string {
 	// use the dash (if the name isn't too long) to make the target name a bit prettier
 	prefix := fmt.Sprintf("%s-", controllerName)
+
+	// Truncate prefix if it exceeds the max length for DNS labels.
+	// Kubernetes will append a random suffix (typically 5 chars) to generateName,
+	// so we need to leave room for that. Max prefix length = 63 - 5 - 1 = 57.
+	// We use 52 to be safe (leaving room for the dash and up to 10 char suffix).
+	maxPrefixLen := 52
+	if len(prefix) > maxPrefixLen {
+		// Truncate from the back to preserve the suffix (more identifying info)
+		prefix = prefix[len(prefix)-maxPrefixLen:]
+	}
+
 	if len(apimachineryvalidation.NameIsDNSSubdomain(prefix, true)) != 0 {
 		prefix = controllerName
+		if len(prefix) > maxPrefixLen {
+			// Truncate from the back to preserve the suffix
+			prefix = prefix[len(prefix)-maxPrefixLen:]
+		}
 	}
 	return prefix
 }
