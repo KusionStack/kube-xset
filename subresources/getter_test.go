@@ -75,6 +75,9 @@ func (m *mockControllerWithoutAdapters) CheckInactive(object client.Object) bool
 func (m *mockControllerWithoutAdapters) GetXOpsPriority(ctx context.Context, c client.Client, object client.Object) (*api.OpsPriority, error) {
 	return nil, nil
 }
+func (m *mockControllerWithoutAdapters) GetTargetPrefix(xset api.XSetObject) string {
+	return ""
+}
 
 // mockControllerWithPvcAdapter implements SubResourcePvcAdapter
 type mockControllerWithPvcAdapter struct {
