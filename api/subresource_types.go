@@ -51,6 +51,17 @@ type SubResourceAdapter interface {
 
 	// GetAttachedResourceNames returns names of subresources attached to target
 	GetAttachedResourceNames(target client.Object) ([]string, error)
+
+	// Optional interfaces:
+	//		- SubResourcePrefixGetter
+}
+
+// SubResourcePrefixGetter is used to get custom prefix for subresource names.
+// If not implemented or returns empty string, defaults to "{xset-name}-{template-name}-".
+// Adapter is responsible for truncation if needed.
+// The returned prefix should end with "-" if a separator is desired.
+type SubResourcePrefixGetter interface {
+	GetSubResourcePrefix(xset XSetObject, template SubResourceTemplate) string
 }
 
 // SubResourceTemplate represents a parsed template with name and hash
