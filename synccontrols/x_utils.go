@@ -23,7 +23,6 @@ import (
 
 	appsv1 "k8s.io/api/apps/v1"
 	"k8s.io/apimachinery/pkg/api/meta"
-	apimachineryvalidation "k8s.io/apimachinery/pkg/api/validation"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	clientutils "kusionstack.io/kube-utils/client"
 	controllerutils "kusionstack.io/kube-utils/controller/utils"
@@ -42,7 +41,7 @@ func NewTargetFrom(setController api.XSetController, xsetLabelAnnoMgr api.XSetLa
 	ownerRef := metav1.NewControllerRef(owner, meta.GroupVersionKind())
 	targetObj.SetOwnerReferences(append(targetObj.GetOwnerReferences(), *ownerRef))
 	targetObj.SetNamespace(owner.GetNamespace())
-	targetObj.SetGenerateName(GetTargetsPrefix(owner.GetName()))
+	targetObj.SetGenerateName(GetTargetsPrefix("", owner.GetName()))
 
 	if IsTargetNamingSuffixPolicyPersistentSequence(setController.GetXSetSpec(owner)) {
 		targetObj.SetName(fmt.Sprintf("%s%d", targetObj.GetGenerateName(), id))
@@ -99,28 +98,13 @@ func AddOrUpdateCondition(status *api.XSetStatus, conditionType api.XSetConditio
 	}
 }
 
-func GetTargetsPrefix(controllerName string) string {
-	// use the dash (if the name isn't too long) to make the target name a bit prettier
-	prefix := fmt.Sprintf("%s-", controllerName)
-
-	// Truncate prefix if it exceeds the max length for DNS labels.
-	// Kubernetes will append a random suffix (typically 5 chars) to generateName,
-	// so we need to leave room for that. Max prefix length = 63 - 5 - 1 = 57.
-	// We use 52 to be safe (leaving room for the dash and up to 10 char suffix).
-	maxPrefixLen := 52
-	if len(prefix) > maxPrefixLen {
-		// Truncate from the back to preserve the suffix (more identifying info)
-		prefix = prefix[len(prefix)-maxPrefixLen:]
+// GetTargetsPrefix returns the prefix for target names.
+// If override is non-empty, uses it; otherwise uses controllerName.
+func GetTargetsPrefix(override, controllerName string) string {
+	if override != "" {
+		return override
 	}
-
-	if len(apimachineryvalidation.NameIsDNSSubdomain(prefix, true)) != 0 {
-		prefix = controllerName
-		if len(prefix) > maxPrefixLen {
-			// Truncate from the back to preserve the suffix
-			prefix = prefix[len(prefix)-maxPrefixLen:]
-		}
-	}
-	return prefix
+	return fmt.Sprintf("%s-", controllerName)
 }
 
 func IsTargetUpdatedRevision(target client.Object, revision string) bool {
