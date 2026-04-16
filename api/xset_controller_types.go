@@ -45,6 +45,7 @@ type XSetController interface {
 	// 		- LifecycleAdapterGetter
 	// 		- ResourceContextAdapterGetter
 	// 		- LabelAnnotationManagerGetter
+	// 		- SubResourceAdapterGetter
 	// 		- SubResourcePvcAdapter
 	// 		- DecorationAdapter
 }
@@ -83,6 +84,12 @@ type ResourceContextAdapterGetter interface {
 // LabelAnnotationManagerGetter is used to get label manager adapter.
 type LabelAnnotationManagerGetter interface {
 	GetLabelManagerAdapter() map[XSetLabelAnnotationEnum]string
+}
+
+// SubResourceAdapterGetter is used to get subresource adapters.
+// Implement this to enable generic subresource management.
+type SubResourceAdapterGetter interface {
+	GetSubResourceAdapters() []SubResourceAdapter
 }
 
 // SubResourcePvcAdapter is used to manage pvc subresource for X, which are declared on XSet, e.g., spec.volumeClaimTemplate.

@@ -22,3 +22,34 @@ func GetSubresourcePvcAdapter(control api.XSetController) (adapter api.SubResour
 	adapter, enabled = control.(api.SubResourcePvcAdapter)
 	return adapter, enabled
 }
+
+// GetSubResourceAdapters returns subresource adapters if the controller implements SubResourceAdapterGetter.
+func GetSubResourceAdapters(control api.XSetController) (adapters []api.SubResourceAdapter, enabled bool) {
+	getter, ok := control.(api.SubResourceAdapterGetter)
+	if !ok {
+		return nil, false
+	}
+	return getter.GetSubResourceAdapters(), true
+}
+
+// BuildAdapters builds the adapter list with auto-bridge for legacy controllers.
+// Priority:
+// 1. If controller implements SubResourceAdapterGetter, use its adapters
+// 2. Else if controller implements SubResourcePvcAdapter, auto-bridge to SubResourceControl
+// 3. Else return nil (no subresource management)
+func BuildAdapters(controller api.XSetController, labelAnnoMgr api.XSetLabelAnnotationManager) []api.SubResourceAdapter {
+	// Priority 1: Controller provides its own adapters
+	if getter, ok := controller.(api.SubResourceAdapterGetter); ok {
+		return getter.GetSubResourceAdapters()
+	}
+
+	// Priority 2: Auto-bridge legacy SubResourcePvcAdapter
+	if _, ok := controller.(api.SubResourcePvcAdapter); ok {
+		return []api.SubResourceAdapter{
+			NewPvcSubResourceAdapter(controller, labelAnnoMgr),
+		}
+	}
+
+	// No subresource management
+	return nil
+}
