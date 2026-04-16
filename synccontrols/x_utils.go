@@ -41,7 +41,13 @@ func NewTargetFrom(setController api.XSetController, xsetLabelAnnoMgr api.XSetLa
 	ownerRef := metav1.NewControllerRef(owner, meta.GroupVersionKind())
 	targetObj.SetOwnerReferences(append(targetObj.GetOwnerReferences(), *ownerRef))
 	targetObj.SetNamespace(owner.GetNamespace())
-	targetObj.SetGenerateName(GetTargetsPrefix("", owner.GetName()))
+
+	// Get prefix from controller (may be empty for default)
+	var prefixOverride string
+	if pg, ok := setController.(api.TargetPrefixGetter); ok {
+		prefixOverride = pg.GetTargetPrefix(owner)
+	}
+	targetObj.SetGenerateName(GetTargetsPrefix(prefixOverride, owner.GetName()))
 
 	if IsTargetNamingSuffixPolicyPersistentSequence(setController.GetXSetSpec(owner)) {
 		targetObj.SetName(fmt.Sprintf("%s%d", targetObj.GetGenerateName(), id))
