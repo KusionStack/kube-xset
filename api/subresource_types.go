@@ -49,9 +49,6 @@ type SubResourceAdapter interface {
 	// AttachToTarget attaches subresources to target (e.g., mount PVC volumes to Pod)
 	AttachToTarget(ctx context.Context, target client.Object, resources []client.Object) error
 
-	// GetAttachedResourceNames returns names of subresources attached to target
-	GetAttachedResourceNames(target client.Object) ([]string, error)
-
 	// Optional interfaces:
 	//		- SubResourcePrefixGetter
 }

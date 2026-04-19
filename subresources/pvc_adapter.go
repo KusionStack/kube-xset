@@ -177,21 +177,4 @@ func (p *PvcSubResourceAdapter) AttachToTarget(ctx context.Context, target clien
 	return nil
 }
 
-// GetAttachedResourceNames returns the names of PVCs attached to the target.
-func (p *PvcSubResourceAdapter) GetAttachedResourceNames(target client.Object) ([]string, error) {
-	pvcAdapter, ok := p.xsetController.(api.SubResourcePvcAdapter)
-	if !ok {
-		return nil, nil
-	}
-
-	volumes := pvcAdapter.GetXSpecVolumes(target)
-	var names []string
-	for _, v := range volumes {
-		if v.PersistentVolumeClaim != nil {
-			names = append(names, v.PersistentVolumeClaim.ClaimName)
-		}
-	}
-	return names, nil
-}
-
 var _ api.SubResourceAdapter = &PvcSubResourceAdapter{}

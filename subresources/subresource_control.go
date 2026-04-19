@@ -656,16 +656,6 @@ func (sc *RealSubResourceControl) deleteUnusedResourcesForAdapter(ctx context.Co
 		return fmt.Errorf("failed to classify %s: %w", gvk.Kind, err)
 	}
 
-	// Get attached resource names from target
-	attachedNames, err := adapter.GetAttachedResourceNames(target)
-	if err != nil {
-		return fmt.Errorf("failed to get attached %s names: %w", gvk.Kind, err)
-	}
-	attachedSet := make(map[string]bool)
-	for _, name := range attachedNames {
-		attachedSet[name] = true
-	}
-
 	// Get template names that are in use
 	templates, err := adapter.GetTemplates(xset)
 	if err != nil {
@@ -676,13 +666,8 @@ func (sc *RealSubResourceControl) deleteUnusedResourcesForAdapter(ctx context.Co
 		templateNames[tmpl.Name] = true
 	}
 
-	// Delete unclaimed old resources (not mounted and not in templates)
+	// Delete unclaimed old resources (not in templates)
 	for templateName, state := range oldResources {
-		// If resource is still attached/mounted, keep it
-		if attachedSet[templateName] {
-			continue
-		}
-
 		// If resource template is still in use, keep it
 		if templateNames[templateName] {
 			continue
@@ -825,40 +810,25 @@ func (r *RealSubResourceControl) isAdapterTemplateChanged(xset api.XSetObject, t
 }
 
 // CheckAllowIncludeExclude checks if target's subresources allow include/exclude.
-// It iterates through all adapters and checks each attached subresource using the provided CheckAllowFunc.
+// It finds subresources by owner reference + instance ID label and checks each using the provided CheckAllowFunc.
 func (r *RealSubResourceControl) CheckAllowIncludeExclude(ctx context.Context, xset api.XSetObject, target client.Object, fn CheckAllowFunc) (bool, error) {
 	xsetGVK := xset.GetObjectKind().GroupVersionKind()
 	ownerName := xset.GetName()
 	ownerKind := xsetGVK.Kind
 
-	for _, adapter := range r.adaptersByGVK {
-		// Get attached resource names from target
-		attachedNames, err := adapter.GetAttachedResourceNames(target)
-		if err != nil {
-			return false, fmt.Errorf("failed to get attached resource names for adapter %s: %w", adapter.Meta().Kind, err)
-		}
+	// Get all subresources owned by this XSet
+	resources, err := r.GetFilteredResources(ctx, xset)
+	if err != nil {
+		return false, fmt.Errorf("failed to get subresources: %w", err)
+	}
 
-		// Check each attached resource
-		for _, resourceName := range attachedNames {
-			// Get the subresource object
-			gvk := adapter.Meta()
-			subResource := newObjectForGVK(gvk)
-			if subResource == nil {
-				continue
-			}
+	// Filter to only those belonging to this target
+	targetResources := r.filterByTarget(resources, target)
 
-			if err := r.client.Get(ctx, client.ObjectKey{
-				Namespace: target.GetNamespace(),
-				Name:      resourceName,
-			}, subResource); err != nil {
-				// If subresource not found, ignore it (might be filtered by controller-mesh)
-				continue
-			}
-
-			// Check if this subresource allows include/exclude
-			if allowed, reason := fn(subResource, ownerName, ownerKind, r.labelAnnoMgr); !allowed {
-				return false, fmt.Errorf("subresource %s/%s does not allow include/exclude: %s", subResource.GetNamespace(), subResource.GetName(), reason)
-			}
+	// Check each subresource
+	for _, state := range targetResources {
+		if allowed, reason := fn(state.Object, ownerName, ownerKind, r.labelAnnoMgr); !allowed {
+			return false, fmt.Errorf("subresource %s/%s does not allow include/exclude: %s", state.Object.GetNamespace(), state.Object.GetName(), reason)
 		}
 	}
 
@@ -866,31 +836,20 @@ func (r *RealSubResourceControl) CheckAllowIncludeExclude(ctx context.Context, x
 }
 
 // AdoptTargetResources adopts subresources for a target during include operation.
-// It finds attached resources by name and sets owner reference + instance ID label.
+// It finds orphaned resources by selector + orphaned label and adopts those that belong to this target.
 func (sc *RealSubResourceControl) AdoptTargetResources(ctx context.Context, xset api.XSetObject, target client.Object, instanceID string) error {
 	for _, adapter := range sc.adaptersByGVK {
-		names, err := adapter.GetAttachedResourceNames(target)
+		// Find orphaned resources for this adapter
+		orphaned, err := sc.findOrphanedResourcesForTarget(ctx, xset, adapter, target)
 		if err != nil {
-			return fmt.Errorf("failed to get attached resource names for adapter %s: %w", adapter.Meta().Kind, err)
+			return fmt.Errorf("failed to find orphaned %s: %w", adapter.Meta().Kind, err)
 		}
-		gvk := adapter.Meta()
-		for _, name := range names {
-			resource := newObjectForGVK(gvk)
-			if resource == nil {
-				continue
-			}
-			if err := sc.client.Get(ctx, client.ObjectKey{
-				Namespace: target.GetNamespace(),
-				Name:      name,
-			}, resource); err != nil {
-				if apierrors.IsNotFound(err) {
-					continue
-				}
-				return err
-			}
-			sc.labelAnnoMgr.Set(resource, api.XInstanceIdLabelKey, instanceID)
-			sc.labelAnnoMgr.Delete(resource, api.XOrphanedIndicationLabelKey)
-			if err := sc.adoptResource(ctx, xset, resource); err != nil {
+
+		for _, res := range orphaned {
+			// Update instance ID and remove orphaned label
+			sc.labelAnnoMgr.Set(res, api.XInstanceIdLabelKey, instanceID)
+			sc.labelAnnoMgr.Delete(res, api.XOrphanedIndicationLabelKey)
+			if err := sc.adoptResource(ctx, xset, res); err != nil {
 				return err
 			}
 		}
@@ -898,34 +857,87 @@ func (sc *RealSubResourceControl) AdoptTargetResources(ctx context.Context, xset
 	return nil
 }
 
-// OrphanTargetResources orphans all subresources for a target during exclude operation.
-// It finds attached resources by name and removes owner reference.
-func (sc *RealSubResourceControl) OrphanTargetResources(ctx context.Context, xset api.XSetObject, target client.Object) error {
-	for _, adapter := range sc.adaptersByGVK {
-		names, err := adapter.GetAttachedResourceNames(target)
-		if err != nil {
-			return fmt.Errorf("failed to get attached resource names for adapter %s: %w", adapter.Meta().Kind, err)
+// findOrphanedResourcesForTarget finds orphaned subresources that belong to a specific target.
+// It uses the PVC adapter (if available) to check which PVCs are mounted to the target.
+func (sc *RealSubResourceControl) findOrphanedResourcesForTarget(ctx context.Context, xset api.XSetObject, adapter api.SubResourceAdapter, target client.Object) ([]client.Object, error) {
+	xsetSpec := sc.xsetController.GetXSetSpec(xset)
+	ownerSelector := xsetSpec.Selector.DeepCopy()
+	if ownerSelector.MatchLabels == nil {
+		ownerSelector.MatchLabels = map[string]string{}
+	}
+	ownerSelector.MatchLabels[sc.labelAnnoMgr.Value(api.ControlledByXSetLabel)] = "true"
+	ownerSelector.MatchExpressions = append(ownerSelector.MatchExpressions, metav1.LabelSelectorRequirement{
+		Key:      sc.labelAnnoMgr.Value(api.XOrphanedIndicationLabelKey),
+		Operator: metav1.LabelSelectorOpExists,
+	})
+
+	selector, err := metav1.LabelSelectorAsSelector(ownerSelector)
+	if err != nil {
+		return nil, err
+	}
+
+	gvk := adapter.Meta()
+	list := sc.newListForGVK(gvk)
+	if list == nil {
+		return nil, nil
+	}
+
+	if err := sc.client.List(ctx, list, &client.ListOptions{
+		Namespace:     xset.GetNamespace(),
+		LabelSelector: selector,
+	}); err != nil {
+		return nil, fmt.Errorf("failed to list orphaned %s: %w", gvk.Kind, err)
+	}
+
+	items := extractListItems(list)
+	var orphaned []client.Object
+	for _, item := range items {
+		// Skip if has owner reference (not truly orphaned)
+		if len(item.GetOwnerReferences()) > 0 {
+			continue
 		}
-		gvk := adapter.Meta()
-		for _, name := range names {
-			resource := newObjectForGVK(gvk)
-			if resource == nil {
-				continue
-			}
-			if err := sc.client.Get(ctx, client.ObjectKey{
-				Namespace: target.GetNamespace(),
-				Name:      name,
-			}, resource); err != nil {
-				if apierrors.IsNotFound(err) {
+
+		// For PVC adapter, check if this PVC is mounted to the target
+		if gvk.Kind == "PersistentVolumeClaim" {
+			if pvcAdapter, ok := sc.xsetController.(api.SubResourcePvcAdapter); ok {
+				volumes := pvcAdapter.GetXSpecVolumes(target)
+				isMounted := false
+				for _, v := range volumes {
+					if v.PersistentVolumeClaim != nil && v.PersistentVolumeClaim.ClaimName == item.GetName() {
+						isMounted = true
+						break
+					}
+				}
+				if !isMounted {
 					continue
 				}
-				return err
-			}
-			sc.labelAnnoMgr.Set(resource, api.XOrphanedIndicationLabelKey, "true")
-			if err := sc.OrphanResource(ctx, xset, resource); err != nil {
-				return err
 			}
 		}
+
+		orphaned = append(orphaned, item)
 	}
+	return orphaned, nil
+}
+
+// OrphanTargetResources orphans all subresources for a target during exclude operation.
+// It finds subresources by owner reference + instance ID label and removes owner reference.
+func (sc *RealSubResourceControl) OrphanTargetResources(ctx context.Context, xset api.XSetObject, target client.Object) error {
+	// Get all subresources owned by this XSet
+	resources, err := sc.GetFilteredResources(ctx, xset)
+	if err != nil {
+		return fmt.Errorf("failed to get subresources: %w", err)
+	}
+
+	// Filter to only those belonging to this target
+	targetResources := sc.filterByTarget(resources, target)
+
+	// Orphan each subresource
+	for _, state := range targetResources {
+		sc.labelAnnoMgr.Set(state.Object, api.XOrphanedIndicationLabelKey, "true")
+		if err := sc.OrphanResource(ctx, xset, state.Object); err != nil {
+			return err
+		}
+	}
+
 	return nil
 }

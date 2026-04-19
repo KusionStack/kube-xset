@@ -69,9 +69,6 @@ func (m *mockAdapter) RecreateWhenXSetUpdated(xset api.XSetObject) bool   { retu
 func (m *mockAdapter) AttachToTarget(ctx context.Context, target client.Object, resources []client.Object) error {
 	return nil
 }
-func (m *mockAdapter) GetAttachedResourceNames(target client.Object) ([]string, error) {
-	return nil, nil
-}
 
 func TestNewRealSubResourceControl(t *testing.T) {
 	// Test with no adapters
@@ -206,10 +203,6 @@ func (m *mockAdapterWithRetain) AttachToTarget(ctx context.Context, target clien
 	return nil
 }
 
-func (m *mockAdapterWithRetain) GetAttachedResourceNames(target client.Object) ([]string, error) {
-	return nil, nil
-}
-
 func TestRealSubResourceControl_CreateTargetResources(t *testing.T) {
 	// This test verifies that CreateTargetResources:
 	// 1. Gets templates from each adapter
@@ -300,8 +293,4 @@ func (m *mockAdapterWithTemplates) RecreateWhenXSetUpdated(xset api.XSetObject) 
 
 func (m *mockAdapterWithTemplates) AttachToTarget(ctx context.Context, target client.Object, resources []client.Object) error {
 	return nil
-}
-
-func (m *mockAdapterWithTemplates) GetAttachedResourceNames(target client.Object) ([]string, error) {
-	return nil, nil
 }

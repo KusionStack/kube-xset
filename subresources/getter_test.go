@@ -120,9 +120,6 @@ func (m *mockSubResourceAdapter) RecreateWhenXSetUpdated(xset api.XSetObject) bo
 func (m *mockSubResourceAdapter) AttachToTarget(ctx context.Context, target client.Object, resources []client.Object) error {
 	return nil
 }
-func (m *mockSubResourceAdapter) GetAttachedResourceNames(target client.Object) ([]string, error) {
-	return nil, nil
-}
 
 // mockControllerWithAdapterGetter implements SubResourceAdapterGetter
 type mockControllerWithAdapterGetter struct {
