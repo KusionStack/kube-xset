@@ -22,54 +22,6 @@ import (
 	"github.com/onsi/gomega"
 )
 
-func TestGetSubResourcePrefix(t *testing.T) {
-	g := gomega.NewGomegaWithT(t)
-
-	tests := []struct {
-		name         string
-		override     string
-		xsetName     string
-		templateName string
-		expected     string
-	}{
-		{
-			name:         "default naming",
-			override:     "",
-			xsetName:     "myset",
-			templateName: "data",
-			expected:     "myset-data-",
-		},
-		{
-			name:         "custom prefix",
-			override:     "custom-",
-			xsetName:     "myset",
-			templateName: "data",
-			expected:     "custom-",
-		},
-		{
-			name:         "custom prefix without dash",
-			override:     "custom",
-			xsetName:     "myset",
-			templateName: "data",
-			expected:     "custom",
-		},
-		{
-			name:         "empty override uses default",
-			override:     "",
-			xsetName:     "test-set",
-			templateName: "pvc-template",
-			expected:     "test-set-pvc-template-",
-		},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			result := GetSubResourcePrefix(tt.override, tt.xsetName, tt.templateName)
-			g.Expect(result).To(gomega.Equal(tt.expected))
-		})
-	}
-}
-
 func TestTemplateHash(t *testing.T) {
 	g := gomega.NewGomegaWithT(t)
 

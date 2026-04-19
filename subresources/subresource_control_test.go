@@ -18,7 +18,6 @@ package subresources
 
 import (
 	"context"
-	"fmt"
 	"testing"
 
 	corev1 "k8s.io/api/core/v1"
@@ -58,9 +57,6 @@ type mockAdapter struct {
 
 func (m *mockAdapter) Meta() schema.GroupVersionKind                         { return m.gvk }
 func (m *mockAdapter) GetTemplates(xset api.XSetObject) ([]api.SubResourceTemplate, error) {
-	return nil, nil
-}
-func (m *mockAdapter) BuildResource(ctx context.Context, xset api.XSetObject, template api.SubResourceTemplate, target client.Object, targetID string) (client.Object, error) {
 	return nil, nil
 }
 func (m *mockAdapter) RetainWhenXSetDeleted(xset api.XSetObject) bool     { return false }
@@ -183,10 +179,6 @@ func (m *mockAdapterWithRetain) GetTemplates(xset api.XSetObject) ([]api.SubReso
 	return nil, nil
 }
 
-func (m *mockAdapterWithRetain) BuildResource(ctx context.Context, xset api.XSetObject, template api.SubResourceTemplate, target client.Object, targetID string) (client.Object, error) {
-	return nil, nil
-}
-
 func (m *mockAdapterWithRetain) RetainWhenXSetDeleted(xset api.XSetObject) bool {
 	return m.retainWhenXSetDeleted
 }
@@ -268,15 +260,6 @@ func (m *mockAdapterWithTemplates) Meta() schema.GroupVersionKind {
 
 func (m *mockAdapterWithTemplates) GetTemplates(xset api.XSetObject) ([]api.SubResourceTemplate, error) {
 	return m.templates, nil
-}
-
-func (m *mockAdapterWithTemplates) BuildResource(ctx context.Context, xset api.XSetObject, template api.SubResourceTemplate, target client.Object, targetID string) (client.Object, error) {
-	return &corev1.PersistentVolumeClaim{
-		ObjectMeta: metav1.ObjectMeta{
-			Name:      fmt.Sprintf("%s-%s-%s", xset.GetName(), template.Name, targetID),
-			Namespace: xset.GetNamespace(),
-		},
-	}, nil
 }
 
 func (m *mockAdapterWithTemplates) RetainWhenXSetDeleted(xset api.XSetObject) bool {

@@ -38,8 +38,8 @@ type XSetController interface {
     ControllerName() string
     FinalizerName() string
 
-    XSetMeta() metav1.TypeMeta      // GVK for XSet (e.g., ModelSet)
-    XMeta() metav1.TypeMeta         // GVK for X (e.g., Model)
+    XSetMeta() metav1.TypeMeta      // GVK for XSet (e.g., CollaSet)
+    XMeta() metav1.TypeMeta         // GVK for X (e.g., Pod)
     NewXSetObject() XSetObject      // Constructor for XSet
     NewXObject() client.Object      // Constructor for X
     NewXObjectList() client.ObjectList
@@ -73,10 +73,10 @@ type XSetOperation interface {
 }
 ```
 
-**Example (ModelSet):**
+**Example (CollaSet):**
 ```go
 func (s *XSetOperation) GetXSetSpec(object xsetapi.XSetObject) *xsetapi.XSetSpec {
-    set := object.(*ModelSet)
+    set := object.(*CollaSet)
     return &xsetapi.XSetSpec{
         Replicas:       set.Spec.Replicas,
         Paused:         set.Spec.Paused,
@@ -155,13 +155,19 @@ The `SubResourceAdapter` interface provides a generic way to manage subresources
 type SubResourceAdapter interface {
     Meta() schema.GroupVersionKind
     GetTemplates(xset XSetObject) ([]SubResourceTemplate, error)
-    BuildResource(ctx context.Context, xset XSetObject, template SubResourceTemplate, target client.Object, targetID string) (client.Object, error)
     RetainWhenXSetDeleted(xset XSetObject) bool
     RetainWhenXSetScaled(xset XSetObject) bool
+    RecreateWhenXSetUpdated(xset XSetObject) bool
     AttachToTarget(ctx context.Context, target client.Object, resources []client.Object) error
-    GetAttachedResourceNames(target client.Object) ([]string, error)
+}
+
+// Optional interface for customizing resources
+type SubResourceDecorator interface {
+    DecorateResource(ctx context.Context, xset XSetObject, template SubResourceTemplate, resource client.Object, target client.Object, targetID string) error
 }
 ```
+
+The control code creates resources from templates and sets namespace, owner reference, and labels. Implement `SubResourceDecorator` to customize the resource (e.g., set Name, add custom labels).
 
 #### Name Truncation
 
@@ -264,30 +270,19 @@ Key labels defined in `api/well_knowns.go`:
 
 ## Example Implementations
 
-### ModelSet (modelops-controller)
-
-Location: `/Users/ana/projects/aicloud/modelops-controller/pkg/controllers/modelset/`
-
-Key files:
-- `modelset_controller.go` - XSetController implementation
-- `resourcecontext_adapter.go` - ResourceContext adapter
-- `well_known_manager.go` - Label manager
-- `decoration_adapter.go` - Decoration adapter
-
-### LeaderSet (aether)
-
-Location: `/Users/ana/projects/aicloud/aether/pkg/controller/leaderworkerset/leaderset/`
-
-Key files:
-- `leaderset_adapter.go` - Full XSetController implementation with PVC
-- `resource_context_adapter.go` - ResourceContext adapter
-- `lifecycle_adapter.go` - Lifecycle adapters
-
 ### CollaSet (kuperator)
 
-Location: `/Users/ana/projects/kusionstack/kuperator/pkg/controllers/collaset/`
+GitHub: https://github.com/KusionStack/kuperator
 
-Original implementation for Pod management with PodDecoration.
+Location: `pkg/controllers/collaset/`
+
+Key files:
+- `collaset_controller.go` - XSetController implementation
+- `collaset_adapter.go` - Adapters for XSetOperation, XOperation
+- `resource_context.go` - ResourceContext adapter
+- `lifecycle_adapter.go` - Lifecycle adapters
+
+CollaSet is the original implementation that kube-xset was extracted from. It manages Pod workloads with PodDecoration support for in-place updates.
 
 ## Key Workflow
 

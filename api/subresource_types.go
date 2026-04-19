@@ -29,11 +29,9 @@ type SubResourceAdapter interface {
 	// Meta returns the GroupVersionKind for this subresource type
 	Meta() schema.GroupVersionKind
 
-	// GetTemplates returns subresource templates from XSet spec
+	// GetTemplates returns subresource templates from XSet spec.
+	// The controller computes the Hash from each template using TemplateHash().
 	GetTemplates(xset XSetObject) ([]SubResourceTemplate, error)
-
-	// BuildResource creates a subresource instance from template for a specific target
-	BuildResource(ctx context.Context, xset XSetObject, template SubResourceTemplate, target client.Object, targetID string) (client.Object, error)
 
 	// RetainWhenXSetDeleted returns true if subresource should be retained when XSet is deleted
 	RetainWhenXSetDeleted(xset XSetObject) bool
@@ -50,22 +48,37 @@ type SubResourceAdapter interface {
 	AttachToTarget(ctx context.Context, target client.Object, resources []client.Object) error
 
 	// Optional interfaces:
-	//		- SubResourcePrefixGetter
+	//   - SubResourceDecorator
 }
 
-// SubResourcePrefixGetter is used to get custom prefix for subresource names.
-// If not implemented or returns empty string, defaults to "{xset-name}-{template-name}-".
-// Adapter is responsible for truncation if needed.
-// The returned prefix should end with "-" if a separator is desired.
-type SubResourcePrefixGetter interface {
-	GetSubResourcePrefix(xset XSetObject, template SubResourceTemplate) string
+// SubResourceDecorator is an optional interface for customizing subresources.
+// Implement this interface to customize the resource created from a template.
+//
+// IMPORTANT: Decorators MUST NOT modify the following fields as they are
+// managed by the control code:
+//   - Namespace (set by control code to xset.Namespace)
+//   - OwnerReferences (set by control code with controller reference to xset)
+//   - Labels managed by control code:
+//   - ControlledByXSetLabel (or equivalent from XSetLabelAnnotationManager)
+//   - XInstanceIdLabelKey (set to targetID)
+//   - Template name label (e.g., SubResourcePvcTemplateLabelKey)
+//   - Template hash label (e.g., SubResourcePvcTemplateHashLabelKey)
+//
+// Decorators CAN:
+//   - Set Name (overrides GenerateName if set)
+//   - Add custom labels and annotations
+//   - Customize spec fields
+//   - Propagate additional labels from xset
+type SubResourceDecorator interface {
+	DecorateResource(ctx context.Context, xset XSetObject, template SubResourceTemplate, resource client.Object, target client.Object, targetID string) error
 }
 
 // SubResourceTemplate represents a parsed template with name and hash
 type SubResourceTemplate struct {
 	// Name is the template name (e.g., "data", "logs")
 	Name string
-	// Hash is the hash of template spec for change detection
+	// Hash is the hash of template spec for change detection.
+	// This is computed by the controller using TemplateHash(), users do not need to set it.
 	Hash string
 	// Template is the parsed template object
 	Template client.Object

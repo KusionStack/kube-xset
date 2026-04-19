@@ -529,18 +529,41 @@ func (sc *RealSubResourceControl) createResourcesForAdapter(ctx context.Context,
 			}
 		}
 
-		// Create new resource
-		resource, err := adapter.BuildResource(ctx, xset, template, target, targetID)
-		if err != nil {
-			return fmt.Errorf("failed to build %s from template %s: %w", gvk.Kind, template.Name, err)
+
+		// Create new resource from template
+		resource := template.Template.DeepCopyObject().(client.Object)
+
+		// Set namespace
+		resource.SetNamespace(xset.GetNamespace())
+
+		// Set owner reference
+		xsetMeta := sc.xsetController.XSetMeta()
+		resource.SetOwnerReferences([]metav1.OwnerReference{
+			*metav1.NewControllerRef(xset, xsetMeta.GroupVersionKind()),
+		})
+
+		// Set labels
+		labels := resource.GetLabels()
+		if labels == nil {
+			labels = make(map[string]string)
+		}
+		labels[sc.labelAnnoMgr.Value(api.ControlledByXSetLabel)] = "true"
+		labels[sc.labelAnnoMgr.Value(api.XInstanceIdLabelKey)] = targetID
+		labels[sc.labelAnnoMgr.Value(api.SubResourcePvcTemplateLabelKey)] = template.Name
+		labels[sc.labelAnnoMgr.Value(api.SubResourcePvcTemplateHashLabelKey)] = template.Hash
+		resource.SetLabels(labels)
+
+		// Let adapter decorate the resource (optional)
+		if decorator, ok := adapter.(api.SubResourceDecorator); ok {
+			if err := decorator.DecorateResource(ctx, xset, template, resource, target, targetID); err != nil {
+				return fmt.Errorf("failed to decorate %s from template %s: %w", gvk.Kind, template.Name, err)
+			}
 		}
 
-		// Set GenerateName with prefix (allows adapter to override prefix)
-		var prefixOverride string
-		if pg, ok := adapter.(api.SubResourcePrefixGetter); ok {
-			prefixOverride = pg.GetSubResourcePrefix(xset, template)
+		// Set GenerateName if Name is not set
+		if resource.GetName() == "" {
+			resource.SetGenerateName(fmt.Sprintf("%s-%s-", xset.GetName(), template.Name))
 		}
-		resource.SetGenerateName(GetSubResourcePrefix(prefixOverride, xset.GetName(), template.Name))
 
 		if err := sc.client.Create(ctx, resource); err != nil {
 			if apierrors.IsAlreadyExists(err) {

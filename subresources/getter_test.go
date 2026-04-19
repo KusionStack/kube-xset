@@ -111,9 +111,6 @@ func (m *mockSubResourceAdapter) Meta() schema.GroupVersionKind {
 func (m *mockSubResourceAdapter) GetTemplates(xset api.XSetObject) ([]api.SubResourceTemplate, error) {
 	return nil, nil
 }
-func (m *mockSubResourceAdapter) BuildResource(ctx context.Context, xset api.XSetObject, template api.SubResourceTemplate, target client.Object, targetID string) (client.Object, error) {
-	return nil, nil
-}
 func (m *mockSubResourceAdapter) RetainWhenXSetDeleted(xset api.XSetObject) bool   { return false }
 func (m *mockSubResourceAdapter) RetainWhenXSetScaled(xset api.XSetObject) bool    { return false }
 func (m *mockSubResourceAdapter) RecreateWhenXSetUpdated(xset api.XSetObject) bool { return false }

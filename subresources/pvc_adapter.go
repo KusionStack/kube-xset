@@ -21,7 +21,6 @@ import (
 	"fmt"
 
 	corev1 "k8s.io/api/core/v1"
-	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime/schema"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
@@ -74,38 +73,6 @@ func (p *PvcSubResourceAdapter) GetTemplates(xset api.XSetObject) ([]api.SubReso
 		})
 	}
 	return result, nil
-}
-
-// BuildResource creates a PVC from a template.
-func (p *PvcSubResourceAdapter) BuildResource(
-	ctx context.Context,
-	xset api.XSetObject,
-	template api.SubResourceTemplate,
-	target client.Object,
-	targetID string,
-) (client.Object, error) {
-	pvc, ok := template.Template.(*corev1.PersistentVolumeClaim)
-	if !ok {
-		return nil, fmt.Errorf("expected PersistentVolumeClaim, got %T", template.Template)
-	}
-
-	pvc = pvc.DeepCopy()
-	pvc.Namespace = xset.GetNamespace()
-
-	xsetMeta := p.xsetController.XSetMeta()
-	pvc.OwnerReferences = []metav1.OwnerReference{
-		*metav1.NewControllerRef(xset, xsetMeta.GroupVersionKind()),
-	}
-
-	if pvc.Labels == nil {
-		pvc.Labels = make(map[string]string)
-	}
-	p.labelManager.SetLabel(pvc, p.labelAnnoMgr.Value(api.ControlledByXSetLabel), "true")
-	p.labelManager.SetLabel(pvc, p.labelAnnoMgr.Value(api.XInstanceIdLabelKey), targetID)
-	p.labelManager.SetLabelWithTrackedOriginal(pvc, p.labelAnnoMgr.Value(api.SubResourcePvcTemplateLabelKey), template.Name)
-	p.labelManager.SetLabel(pvc, p.labelAnnoMgr.Value(api.SubResourcePvcTemplateHashLabelKey), template.Hash)
-
-	return pvc, nil
 }
 
 // RetainWhenXSetDeleted returns whether PVCs should be retained when XSet is deleted.

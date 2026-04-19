@@ -34,3 +34,6 @@ go.work.sum
 
 # Worktrees
 .worktrees/
+
+# Superpowers plans (local planning artifacts)
+docs/superpowers/plans/

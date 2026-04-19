@@ -49,12 +49,3 @@ func ObjectKeyString(obj interface {
 	}
 	return obj.GetNamespace() + "/" + obj.GetName()
 }
-
-// GetSubResourcePrefix returns the prefix for subresource names.
-// If override is non-empty, uses it; otherwise uses "{xsetName}-{templateName}-".
-func GetSubResourcePrefix(override, xsetName, templateName string) string {
-	if override != "" {
-		return override
-	}
-	return fmt.Sprintf("%s-%s-", xsetName, templateName)
-}
