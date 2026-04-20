@@ -373,12 +373,12 @@ func (sc *RealSubResourceControl) classifyResourcesByHash(targetID string, xset 
 		}
 
 		// Get template hash and name
-		resourceHash, exist := sc.labelAnnoMgr.Get(state.Object, api.SubResourcePvcTemplateHashLabelKey)
+		resourceHash, exist := sc.labelAnnoMgr.Get(state.Object, api.SubResourceTemplateHashLabelKey)
 		if !exist {
 			continue
 		}
 
-		templateName, _ := sc.labelAnnoMgr.Get(state.Object, api.SubResourcePvcTemplateLabelKey)
+		templateName, _ := sc.labelAnnoMgr.Get(state.Object, api.SubResourceTemplateLabelKey)
 
 		// Classify by hash comparison
 		if currentHash, ok := templateHashes[templateName]; ok && currentHash == resourceHash {
@@ -505,7 +505,7 @@ func (sc *RealSubResourceControl) createResourcesForAdapter(ctx context.Context,
 			if resourceID != targetID {
 				continue
 			}
-			templateName, _ := sc.labelAnnoMgr.Get(state.Object, api.SubResourcePvcTemplateLabelKey)
+			templateName, _ := sc.labelAnnoMgr.Get(state.Object, api.SubResourceTemplateLabelKey)
 			if templateName != "" {
 				existingByTemplateName[templateName] = state
 			}
@@ -517,7 +517,7 @@ func (sc *RealSubResourceControl) createResourcesForAdapter(ctx context.Context,
 	for _, template := range templates {
 		// Check if we can reuse existing resource
 		if existing, ok := existingByTemplateName[template.Name]; ok {
-			existingHash, _ := sc.labelAnnoMgr.Get(existing.Object, api.SubResourcePvcTemplateHashLabelKey)
+			existingHash, _ := sc.labelAnnoMgr.Get(existing.Object, api.SubResourceTemplateHashLabelKey)
 			if existingHash == template.Hash {
 				// Reuse existing — hash matches, no need to recreate
 				createdResources = append(createdResources, existing.Object)
@@ -528,7 +528,6 @@ func (sc *RealSubResourceControl) createResourcesForAdapter(ctx context.Context,
 				return fmt.Errorf("failed to delete old %s %s: %w", gvk.Kind, existing.Object.GetName(), err)
 			}
 		}
-
 
 		// Create new resource from template
 		resource := template.Template.DeepCopyObject().(client.Object)
@@ -549,8 +548,8 @@ func (sc *RealSubResourceControl) createResourcesForAdapter(ctx context.Context,
 		}
 		labels[sc.labelAnnoMgr.Value(api.ControlledByXSetLabel)] = "true"
 		labels[sc.labelAnnoMgr.Value(api.XInstanceIdLabelKey)] = targetID
-		labels[sc.labelAnnoMgr.Value(api.SubResourcePvcTemplateLabelKey)] = template.Name
-		labels[sc.labelAnnoMgr.Value(api.SubResourcePvcTemplateHashLabelKey)] = template.Hash
+		labels[sc.labelAnnoMgr.Value(api.SubResourceTemplateLabelKey)] = template.Name
+		labels[sc.labelAnnoMgr.Value(api.SubResourceTemplateHashLabelKey)] = template.Hash
 		resource.SetLabels(labels)
 
 		// Let adapter decorate the resource (optional)
@@ -805,12 +804,12 @@ func (r *RealSubResourceControl) isAdapterTemplateChanged(xset api.XSetObject, t
 		}
 
 		// Get template name and hash from the resource
-		templateName, exist := r.labelAnnoMgr.Get(state.Object, api.SubResourcePvcTemplateLabelKey)
+		templateName, exist := r.labelAnnoMgr.Get(state.Object, api.SubResourceTemplateLabelKey)
 		if !exist {
 			continue
 		}
 
-		resourceHash, exist := r.labelAnnoMgr.Get(state.Object, api.SubResourcePvcTemplateHashLabelKey)
+		resourceHash, exist := r.labelAnnoMgr.Get(state.Object, api.SubResourceTemplateHashLabelKey)
 		if !exist {
 			// No hash means we can't compare, treat as changed
 			return true, nil
