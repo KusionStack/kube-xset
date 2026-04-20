@@ -434,7 +434,7 @@ func (pc *RealPvcControl) buildPvcWithHash(id string, xset api.XSetObject, pvcTm
 	}
 	pc.xsetLabelAnnoMgr.Set(claim, api.SubResourcePvcTemplateHashLabelKey, hash)
 	pc.xsetLabelAnnoMgr.Set(claim, api.XInstanceIdLabelKey, id)
-	pc.xsetLabelAnnoMgr.Set(claim, api.SubResourcePvcTemplateLabelKey, pvcTmp.Name)
+	pc.xsetLabelAnnoMgr.Set(claim, api.SubResourceTemplateLabelKey, pvcTmp.Name)
 	return claim, nil
 }
 
@@ -485,7 +485,7 @@ func (pc *RealPvcControl) classifyTargetPvcs(id string, xset api.XSetObject, exi
 }
 
 func (pc *RealPvcControl) extractPvcTmpName(xset api.XSetObject, pvc *corev1.PersistentVolumeClaim) (string, error) {
-	if pvcTmpName, exist := pc.xsetLabelAnnoMgr.Get(pvc, api.SubResourcePvcTemplateLabelKey); exist {
+	if pvcTmpName, exist := pc.xsetLabelAnnoMgr.Get(pvc, api.SubResourceTemplateLabelKey); exist {
 		return pvcTmpName, nil
 	}
 	lastDashIndex := strings.LastIndex(pvc.Name, "-")
