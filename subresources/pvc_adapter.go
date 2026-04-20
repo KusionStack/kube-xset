@@ -115,7 +115,7 @@ func (p *PvcSubResourceAdapter) AttachToTarget(ctx context.Context, target clien
 		if !ok {
 			continue
 		}
-		templateName := pvc.Labels[p.labelAnnoMgr.Value(api.SubResourcePvcTemplateLabelKey)]
+		templateName := pvc.Labels[p.labelAnnoMgr.Value(api.SubResourceTemplateLabelKey)]
 		volumes = append(volumes, corev1.Volume{
 			Name: templateName,
 			VolumeSource: corev1.VolumeSource{
