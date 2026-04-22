@@ -18,154 +18,127 @@ package subresources
 
 import (
 	"context"
+	"fmt"
 
 	corev1 "k8s.io/api/core/v1"
-	"kusionstack.io/kube-utils/controller/expectations"
-	"kusionstack.io/kube-utils/controller/mixin"
+	"k8s.io/apimachinery/pkg/runtime/schema"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
 	"kusionstack.io/kube-xset/api"
 )
 
-// FieldIndexOwnerRefUID is the field index for owner reference UID.
-const FieldIndexOwnerRefUID = "ownerRefUID"
-
 // PVCGvk is the GroupVersionKind for PersistentVolumeClaim.
 var PVCGvk = corev1.SchemeGroupVersion.WithKind("PersistentVolumeClaim")
 
-// PvcControl interface for PVC lifecycle management.
-// This interface is kept for backward compatibility.
-type PvcControl interface {
-	GetFilteredPvcs(context.Context, api.XSetObject) ([]*corev1.PersistentVolumeClaim, error)
-	CreateTargetPvcs(context.Context, api.XSetObject, client.Object, []*corev1.PersistentVolumeClaim) error
-	DeleteTargetPvcs(context.Context, api.XSetObject, client.Object, []*corev1.PersistentVolumeClaim) error
-	DeleteTargetUnusedPvcs(context.Context, api.XSetObject, client.Object, []*corev1.PersistentVolumeClaim) error
-	OrphanPvc(context.Context, api.XSetObject, *corev1.PersistentVolumeClaim) error
-	AdoptPvc(context.Context, api.XSetObject, *corev1.PersistentVolumeClaim) error
-	AdoptPvcsLeftByRetainPolicy(context.Context, api.XSetObject) ([]*corev1.PersistentVolumeClaim, error)
-	IsTargetPvcTmpChanged(api.XSetObject, client.Object, []*corev1.PersistentVolumeClaim) (bool, error)
-	RetainPvcWhenXSetDeleted(xset api.XSetObject) bool
-	RetainPvcWhenXSetScaled(xset api.XSetObject) bool
+// PvcSubResourceAdapter implements SubResourceAdapter for PVC.
+// It bridges to the legacy SubResourcePvcAdapter for backward compatibility.
+type PvcSubResourceAdapter struct {
+	xsetController api.XSetController
+	labelAnnoMgr   api.XSetLabelAnnotationManager
 }
 
-// pvcControlWrapper wraps SubResourceControl to implement PvcControl.
-type pvcControlWrapper struct {
-	subResourceControl SubResourceControl
-	pvcAdapter         api.SubResourcePvcAdapter
+// NewPvcSubResourceAdapter creates a new PVC adapter.
+func NewPvcSubResourceAdapter(xsetController api.XSetController, labelAnnoMgr api.XSetLabelAnnotationManager) *PvcSubResourceAdapter {
+	return &PvcSubResourceAdapter{
+		xsetController: xsetController,
+		labelAnnoMgr:   labelAnnoMgr,
+	}
 }
 
-// NewRealPvcControl creates a PvcControl from SubResourceControl.
-// Returns nil if the controller does not implement SubResourcePvcAdapter.
-func NewRealPvcControl(mixin *mixin.ReconcilerMixin, expectations *expectations.CacheExpectations, xsetLabelAnnoMgr api.XSetLabelAnnotationManager, xsetController api.XSetController) (PvcControl, error) {
-	pvcAdapter, ok := GetSubresourcePvcAdapter(xsetController)
+// Meta returns the GVK for PVC.
+func (p *PvcSubResourceAdapter) Meta() schema.GroupVersionKind {
+	return PVCGvk
+}
+
+// GetTemplates returns PVC templates from the XSet.
+func (p *PvcSubResourceAdapter) GetTemplates(xset api.XSetObject) ([]api.SubResourceTemplate, error) {
+	pvcAdapter, ok := p.xsetController.(api.SubResourcePvcAdapter)
 	if !ok {
 		return nil, nil
 	}
 
-	adapters := []api.SubResourceAdapter{
-		NewPvcSubResourceAdapter(xsetController, xsetLabelAnnoMgr),
-	}
-
-	subResourceControl, err := NewRealSubResourceControl(mixin, adapters, expectations, xsetLabelAnnoMgr, xsetController)
-	if err != nil {
-		return nil, err
-	}
-
-	return &pvcControlWrapper{
-		subResourceControl: subResourceControl,
-		pvcAdapter:         pvcAdapter,
-	}, nil
-}
-
-// GetFilteredPvcs delegates to SubResourceControl and converts to PVC slice.
-func (w *pvcControlWrapper) GetFilteredPvcs(ctx context.Context, xset api.XSetObject) ([]*corev1.PersistentVolumeClaim, error) {
-	resources, err := w.subResourceControl.GetFilteredResources(ctx, xset)
-	if err != nil {
-		return nil, err
-	}
-
-	var pvcs []*corev1.PersistentVolumeClaim
-	for _, state := range resources {
-		if pvc, ok := state.Object.(*corev1.PersistentVolumeClaim); ok {
-			pvcs = append(pvcs, pvc)
+	templates := pvcAdapter.GetXSetPvcTemplate(xset)
+	var result []api.SubResourceTemplate
+	for i := range templates {
+		hash, err := TemplateHash(&templates[i])
+		if err != nil {
+			return nil, fmt.Errorf("failed to compute PVC template hash: %w", err)
 		}
+		result = append(result, api.SubResourceTemplate{
+			Name:     templates[i].Name,
+			Hash:     hash,
+			Template: &templates[i],
+		})
 	}
-	return pvcs, nil
+	return result, nil
 }
 
-// CreateTargetPvcs delegates to SubResourceControl.
-func (w *pvcControlWrapper) CreateTargetPvcs(ctx context.Context, xset api.XSetObject, target client.Object, existingPvcs []*corev1.PersistentVolumeClaim) error {
-	existing := pvcsToSubResourceStates(existingPvcs)
-	return w.subResourceControl.CreateTargetResources(ctx, xset, target, existing)
-}
-
-// DeleteTargetPvcs delegates to SubResourceControl.
-func (w *pvcControlWrapper) DeleteTargetPvcs(ctx context.Context, xset api.XSetObject, target client.Object, pvcs []*corev1.PersistentVolumeClaim) error {
-	existing := pvcsToSubResourceStates(pvcs)
-	return w.subResourceControl.DeleteTargetResources(ctx, xset, target, existing, false)
-}
-
-// DeleteTargetUnusedPvcs delegates to SubResourceControl.
-func (w *pvcControlWrapper) DeleteTargetUnusedPvcs(ctx context.Context, xset api.XSetObject, target client.Object, existingPvcs []*corev1.PersistentVolumeClaim) error {
-	existing := pvcsToSubResourceStates(existingPvcs)
-	return w.subResourceControl.DeleteTargetUnusedResources(ctx, xset, target, existing)
-}
-
-// OrphanPvc delegates to SubResourceControl.
-func (w *pvcControlWrapper) OrphanPvc(ctx context.Context, xset api.XSetObject, pvc *corev1.PersistentVolumeClaim) error {
-	return w.subResourceControl.OrphanResource(ctx, xset, pvc)
-}
-
-// AdoptPvc adopts a single PVC.
-func (w *pvcControlWrapper) AdoptPvc(ctx context.Context, xset api.XSetObject, pvc *corev1.PersistentVolumeClaim) error {
-	return w.subResourceControl.AdoptSingleResource(ctx, xset, pvc)
-}
-
-// AdoptPvcsLeftByRetainPolicy delegates to SubResourceControl.
-func (w *pvcControlWrapper) AdoptPvcsLeftByRetainPolicy(ctx context.Context, xset api.XSetObject) ([]*corev1.PersistentVolumeClaim, error) {
-	resources, err := w.subResourceControl.AdoptOrphanedResources(ctx, xset)
-	if err != nil {
-		return nil, err
+// RetainWhenXSetDeleted returns whether PVCs should be retained when XSet is deleted.
+func (p *PvcSubResourceAdapter) RetainWhenXSetDeleted(xset api.XSetObject) bool {
+	if pvcAdapter, ok := p.xsetController.(api.SubResourcePvcAdapter); ok {
+		return pvcAdapter.RetainPvcWhenXSetDeleted(xset)
 	}
+	return false
+}
 
-	var pvcs []*corev1.PersistentVolumeClaim
-	for _, state := range resources {
-		if pvc, ok := state.Object.(*corev1.PersistentVolumeClaim); ok {
-			pvcs = append(pvcs, pvc)
-		}
+// RetainWhenXSetScaled returns whether PVCs should be retained when XSet is scaled in.
+func (p *PvcSubResourceAdapter) RetainWhenXSetScaled(xset api.XSetObject) bool {
+	if pvcAdapter, ok := p.xsetController.(api.SubResourcePvcAdapter); ok {
+		return pvcAdapter.RetainPvcWhenXSetScaled(xset)
 	}
-	return pvcs, nil
+	return false
 }
 
-// IsTargetPvcTmpChanged delegates to SubResourceControl.
-func (w *pvcControlWrapper) IsTargetPvcTmpChanged(xset api.XSetObject, target client.Object, existingPvcs []*corev1.PersistentVolumeClaim) (bool, error) {
-	existing := pvcsToSubResourceStates(existingPvcs)
-	return w.subResourceControl.IsTargetTemplateChanged(xset, target, existing, false)
+// RecreateWhenXSetUpdated returns false by default for backward compatibility.
+// PVCs are recreated only when template spec changes (hash mismatch).
+func (p *PvcSubResourceAdapter) RecreateWhenXSetUpdated(xset api.XSetObject) bool {
+	return false
 }
 
-// RetainPvcWhenXSetDeleted delegates to PVC adapter.
-func (w *pvcControlWrapper) RetainPvcWhenXSetDeleted(xset api.XSetObject) bool {
-	return w.pvcAdapter.RetainPvcWhenXSetDeleted(xset)
-}
-
-// RetainPvcWhenXSetScaled delegates to PVC adapter.
-func (w *pvcControlWrapper) RetainPvcWhenXSetScaled(xset api.XSetObject) bool {
-	return w.pvcAdapter.RetainPvcWhenXSetScaled(xset)
-}
-
-// pvcsToSubResourceStates converts PVC slice to SubResourceState slice.
-func pvcsToSubResourceStates(pvcs []*corev1.PersistentVolumeClaim) []SubResourceState {
-	if pvcs == nil {
+// AttachToTarget attaches PVCs to the target by setting volumes.
+func (p *PvcSubResourceAdapter) AttachToTarget(ctx context.Context, target client.Object, resources []client.Object) error {
+	if len(resources) == 0 {
 		return nil
 	}
-	states := make([]SubResourceState, len(pvcs))
-	pvcGVK := corev1.SchemeGroupVersion.WithKind("PersistentVolumeClaim")
-	for i, pvc := range pvcs {
-		states[i] = SubResourceState{
-			Object:  pvc,
-			GVK:     pvcGVK,
-		}
+
+	pvcAdapter, ok := p.xsetController.(api.SubResourcePvcAdapter)
+	if !ok {
+		return nil
 	}
-	return states
+
+	var volumes []corev1.Volume
+	for _, res := range resources {
+		pvc, ok := res.(*corev1.PersistentVolumeClaim)
+		if !ok {
+			continue
+		}
+		templateName := pvc.Labels[p.labelAnnoMgr.Value(api.SubResourceTemplateLabelKey)]
+		volumes = append(volumes, corev1.Volume{
+			Name: templateName,
+			VolumeSource: corev1.VolumeSource{
+				PersistentVolumeClaim: &corev1.PersistentVolumeClaimVolumeSource{
+					ClaimName: pvc.Name,
+				},
+			},
+		})
+	}
+
+	existingVolumes := pvcAdapter.GetXSpecVolumes(target)
+	volumeMap := make(map[string]corev1.Volume)
+	for _, v := range existingVolumes {
+		volumeMap[v.Name] = v
+	}
+	for _, v := range volumes {
+		volumeMap[v.Name] = v
+	}
+
+	var mergedVolumes []corev1.Volume
+	for _, v := range volumeMap {
+		mergedVolumes = append(mergedVolumes, v)
+	}
+
+	pvcAdapter.SetXSpecVolumes(target, mergedVolumes)
+	return nil
 }
 
+var _ api.SubResourceAdapter = &PvcSubResourceAdapter{}

@@ -36,6 +36,9 @@ import (
 	"kusionstack.io/kube-xset/api"
 )
 
+// FieldIndexOwnerRefUID is the field index for owner reference UID.
+const FieldIndexOwnerRefUID = "ownerRefUID"
+
 // SubResourceState wraps a subresource with its adapter metadata.
 type SubResourceState struct {
 	// Object is the actual subresource (PVC, Service, etc.)
@@ -47,7 +50,6 @@ type SubResourceState struct {
 }
 
 // SubResourceControl manages all subresource types through registered adapters.
-// It replaces the legacy PvcControl with a generic interface.
 type SubResourceControl interface {
 	// Lifecycle operations (called from sync_control.go)
 
@@ -97,7 +99,6 @@ type SubResourceControl interface {
 	OrphanTargetResources(ctx context.Context, xset api.XSetObject, target client.Object) error
 
 	// AdoptSingleResource adopts a single subresource by setting owner reference.
-	// This is used by the PvcControl wrapper for single-resource adoption.
 	AdoptSingleResource(ctx context.Context, xset api.XSetObject, resource client.Object) error
 }
 

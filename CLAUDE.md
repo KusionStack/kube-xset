@@ -138,11 +138,12 @@ type SubResourcePvcAdapter interface {
 
 #### SubResourceAdapterGetter (for generic subresource management)
 
+Controllers implementing `SubResourcePvcAdapter` are automatically bridged to `SubResourceAdapter` via `BuildAdapters()`. For custom subresource types, implement `SubResourceAdapterGetter`:
+
 ```go
 func (c *MyXSetController) GetSubResourceAdapters() []xsetapi.SubResourceAdapter {
     return []xsetapi.SubResourceAdapter{
-        subresources.NewPvcSubResourceAdapter(xsetController, labelAnnoMgr),
-        // Add other adapters as needed
+        // Add custom adapters as needed
     }
 }
 ```

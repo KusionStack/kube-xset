@@ -38,3 +38,4 @@ go.work.sum
 # Superpowers plans (local planning artifacts)
 docs/superpowers/plans/
 docs/superpowers/
+.envrc
