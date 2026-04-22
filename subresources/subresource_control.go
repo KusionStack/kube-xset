@@ -22,6 +22,7 @@ import (
 
 	corev1 "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
+	"k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/fields"
 	"k8s.io/apimachinery/pkg/runtime"
@@ -224,24 +225,16 @@ func (sc *RealSubResourceControl) newListForGVK(gvk schema.GroupVersionKind) cli
 	}
 }
 
-// extractListItems extracts items from a list object.
+// extractListItems extracts items from any ObjectList using reflection.
 func extractListItems(list client.ObjectList) []client.Object {
-	switch l := list.(type) {
-	case *corev1.PersistentVolumeClaimList:
-		items := make([]client.Object, len(l.Items))
-		for i := range l.Items {
-			items[i] = &l.Items[i]
-		}
-		return items
-	case *corev1.ServiceList:
-		items := make([]client.Object, len(l.Items))
-		for i := range l.Items {
-			items[i] = &l.Items[i]
-		}
-		return items
-	default:
+	items := make([]client.Object, 0)
+	if err := meta.EachListItem(list, func(obj runtime.Object) error {
+		items = append(items, obj.(client.Object))
+		return nil
+	}); err != nil {
 		return nil
 	}
+	return items
 }
 
 // AdoptOrphanedResources adopts subresources left by retention policy.
