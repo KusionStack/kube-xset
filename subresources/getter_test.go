@@ -66,12 +66,12 @@ func (m *mockControllerWithoutAdapters) GetXSetTemplatePatcher(object metav1.Obj
 func (m *mockControllerWithoutAdapters) GetXObjectFromRevision(revision *appsv1.ControllerRevision) (client.Object, error) {
 	return nil, nil
 }
-func (m *mockControllerWithoutAdapters) CheckScheduled(object client.Object) bool  { return false }
+func (m *mockControllerWithoutAdapters) CheckScheduled(object client.Object) bool { return false }
 func (m *mockControllerWithoutAdapters) CheckReadyTime(object client.Object) (bool, *metav1.Time) {
 	return false, nil
 }
-func (m *mockControllerWithoutAdapters) CheckAvailable(object client.Object) bool   { return false }
-func (m *mockControllerWithoutAdapters) CheckInactive(object client.Object) bool    { return false }
+func (m *mockControllerWithoutAdapters) CheckAvailable(object client.Object) bool { return false }
+func (m *mockControllerWithoutAdapters) CheckInactive(object client.Object) bool  { return false }
 func (m *mockControllerWithoutAdapters) GetXOpsPriority(ctx context.Context, c client.Client, object client.Object) (*api.OpsPriority, error) {
 	return nil, nil
 }

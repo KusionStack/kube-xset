@@ -50,8 +50,8 @@ func TestTemplateHash(t *testing.T) {
 			expectError: false,
 		},
 		{
-			name: "empty object",
-			obj:  map[string]interface{}{},
+			name:        "empty object",
+			obj:         map[string]interface{}{},
 			expectError: false,
 		},
 	}
@@ -105,8 +105,8 @@ func TestObjectKeyString(t *testing.T) {
 	g := gomega.NewGomegaWithT(t)
 
 	tests := []struct {
-		name     string
-		obj      interface {
+		name string
+		obj  interface {
 			GetNamespace() string
 			GetName() string
 		}

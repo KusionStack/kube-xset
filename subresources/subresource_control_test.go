@@ -55,13 +55,13 @@ type mockAdapter struct {
 	gvk schema.GroupVersionKind
 }
 
-func (m *mockAdapter) Meta() schema.GroupVersionKind                         { return m.gvk }
+func (m *mockAdapter) Meta() schema.GroupVersionKind { return m.gvk }
 func (m *mockAdapter) GetTemplates(xset api.XSetObject) ([]api.SubResourceTemplate, error) {
 	return nil, nil
 }
-func (m *mockAdapter) RetainWhenXSetDeleted(xset api.XSetObject) bool     { return false }
-func (m *mockAdapter) RetainWhenXSetScaled(xset api.XSetObject) bool      { return false }
-func (m *mockAdapter) RecreateWhenXSetUpdated(xset api.XSetObject) bool   { return false }
+func (m *mockAdapter) RetainWhenXSetDeleted(xset api.XSetObject) bool   { return false }
+func (m *mockAdapter) RetainWhenXSetScaled(xset api.XSetObject) bool    { return false }
+func (m *mockAdapter) RecreateWhenXSetUpdated(xset api.XSetObject) bool { return false }
 func (m *mockAdapter) AttachToTarget(ctx context.Context, target client.Object, resources []client.Object) error {
 	return nil
 }
@@ -135,7 +135,7 @@ func TestRealSubResourceControl_AdoptOrphanedResources(t *testing.T) {
 			name: "adapter with RetainWhenXSetDeleted=true attempts adoption",
 			adapters: []api.SubResourceAdapter{
 				&mockAdapterWithRetain{
-					gvk:                  corev1.SchemeGroupVersion.WithKind("PersistentVolumeClaim"),
+					gvk:                   corev1.SchemeGroupVersion.WithKind("PersistentVolumeClaim"),
 					retainWhenXSetDeleted: true,
 				},
 			},
@@ -166,9 +166,9 @@ func TestRealSubResourceControl_AdoptOrphanedResources(t *testing.T) {
 
 // mockAdapterWithRetain is a mock adapter that can be configured with retention behavior.
 type mockAdapterWithRetain struct {
-	gvk                  schema.GroupVersionKind
+	gvk                   schema.GroupVersionKind
 	retainWhenXSetDeleted bool
-	retainWhenXSetScaled bool
+	retainWhenXSetScaled  bool
 }
 
 func (m *mockAdapterWithRetain) Meta() schema.GroupVersionKind {
