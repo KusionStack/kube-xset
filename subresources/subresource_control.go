@@ -95,6 +95,10 @@ type SubResourceControl interface {
 
 	// OrphanTargetResources orphans all subresources for a target during exclude operation
 	OrphanTargetResources(ctx context.Context, xset api.XSetObject, target client.Object) error
+
+	// AdoptSingleResource adopts a single subresource by setting owner reference.
+	// This is used by the PvcControl wrapper for single-resource adoption.
+	AdoptSingleResource(ctx context.Context, xset api.XSetObject, resource client.Object) error
 }
 
 // CheckAllowFunc is the function type for checking include/exclude permission.
@@ -329,6 +333,11 @@ func (sc *RealSubResourceControl) adoptResource(ctx context.Context, xset api.XS
 		return fmt.Errorf("failed to adopt subresource: %w", err)
 	}
 	return nil
+}
+
+// AdoptSingleResource adopts a single subresource by setting owner reference.
+func (sc *RealSubResourceControl) AdoptSingleResource(ctx context.Context, xset api.XSetObject, resource client.Object) error {
+	return sc.adoptResource(ctx, xset, resource)
 }
 
 // classifyResourcesByHash classifies resources into new and old based on template hash.
