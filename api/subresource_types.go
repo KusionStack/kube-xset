@@ -19,7 +19,6 @@ package api
 import (
 	"context"
 
-	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/runtime/schema"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 )
@@ -85,13 +84,3 @@ type SubResourceTemplate struct {
 	Template client.Object
 }
 
-// SubResourceSchemeAdapter is an optional interface for scheme registration.
-// Implement this if your subresource types are not already in the scheme.
-// Standard Kubernetes types (PVC, Service, etc.) are already registered
-// and do not need to implement this interface.
-type SubResourceSchemeAdapter interface {
-	SubResourceAdapter
-	// RegisterTypes registers the subresource types with the scheme.
-	// Return nil if types are already registered (e.g., standard Kubernetes types).
-	RegisterTypes(scheme *runtime.Scheme) error
-}

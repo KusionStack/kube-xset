@@ -128,18 +128,11 @@ func NewRealSubResourceControl(
 		return nil, nil
 	}
 
-	// Build GVK index and register types from adapters
+	// Build GVK index from adapters
 	adaptersByGVK := make(map[schema.GroupVersionKind]api.SubResourceAdapter)
 	for _, adapter := range adapters {
 		gvk := adapter.Meta()
 		adaptersByGVK[gvk] = adapter
-
-		// Register types if adapter implements SubResourceSchemeAdapter
-		if reg, ok := adapter.(api.SubResourceSchemeAdapter); ok {
-			if err := reg.RegisterTypes(mixin.Scheme); err != nil {
-				return nil, fmt.Errorf("failed to register types for %s: %w", gvk, err)
-			}
-		}
 	}
 
 	// Set up cache indexes for all adapter GVKs
