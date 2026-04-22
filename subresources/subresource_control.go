@@ -20,7 +20,6 @@ import (
 	"context"
 	"fmt"
 
-	corev1 "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -125,14 +124,22 @@ func NewRealSubResourceControl(
 		return nil, nil
 	}
 
-	// Build GVK index
+	// Build GVK index and register types from adapters
 	adaptersByGVK := make(map[schema.GroupVersionKind]api.SubResourceAdapter)
 	for _, adapter := range adapters {
-		adaptersByGVK[adapter.Meta()] = adapter
+		gvk := adapter.Meta()
+		adaptersByGVK[gvk] = adapter
+
+		// Register types if adapter implements SubResourceSchemeAdapter
+		if reg, ok := adapter.(api.SubResourceSchemeAdapter); ok {
+			if err := reg.RegisterTypes(mixin.Scheme); err != nil {
+				return nil, fmt.Errorf("failed to register types for %s: %w", gvk, err)
+			}
+		}
 	}
 
 	// Set up cache indexes for all adapter GVKs
-	if err := setUpCacheForAdapters(mixin.Cache, adapters, xsetController); err != nil {
+	if err := setUpCacheForAdapters(mixin.Cache, mixin.Scheme, adapters, xsetController); err != nil {
 		return nil, err
 	}
 
@@ -147,14 +154,14 @@ func NewRealSubResourceControl(
 }
 
 // setUpCacheForAdapters registers field indexes for all adapter GVKs.
-func setUpCacheForAdapters(cache cache.Cache, adapters []api.SubResourceAdapter, controller api.XSetController) error {
+func setUpCacheForAdapters(cache cache.Cache, scheme *runtime.Scheme, adapters []api.SubResourceAdapter, controller api.XSetController) error {
 	for _, adapter := range adapters {
 		gvk := adapter.Meta()
-		obj := newObjectForGVK(gvk)
-		if obj == nil {
+		obj, err := scheme.New(gvk)
+		if err != nil {
 			continue // Skip unknown GVKs
 		}
-		if err := cache.IndexField(context.TODO(), obj, FieldIndexOwnerRefUID, func(object client.Object) []string {
+		if err := cache.IndexField(context.TODO(), obj.(client.Object), FieldIndexOwnerRefUID, func(object client.Object) []string {
 			ownerRef := metav1.GetControllerOf(object)
 			if ownerRef == nil || ownerRef.Kind != controller.XSetMeta().Kind {
 				return nil
@@ -167,17 +174,23 @@ func setUpCacheForAdapters(cache cache.Cache, adapters []api.SubResourceAdapter,
 	return nil
 }
 
-// newObjectForGVK creates a new object for the given GVK.
-func newObjectForGVK(gvk schema.GroupVersionKind) client.Object {
-	switch gvk {
-	case corev1.SchemeGroupVersion.WithKind("PersistentVolumeClaim"):
-		return &corev1.PersistentVolumeClaim{}
-	case corev1.SchemeGroupVersion.WithKind("Service"):
-		return &corev1.Service{}
-	default:
-		// Fallback: try to create via scheme if available
-		return nil
+// newListForGVK creates a new list object for the given GVK using the scheme.
+func (sc *RealSubResourceControl) newListForGVK(gvk schema.GroupVersionKind) (client.ObjectList, error) {
+	listGVK := gvk.GroupVersion().WithKind(gvk.Kind + "List")
+	obj, err := sc.scheme.New(listGVK)
+	if err != nil {
+		return nil, fmt.Errorf("failed to create list for GVK %s: %w", gvk, err)
 	}
+	return obj.(client.ObjectList), nil
+}
+
+// newObjectForGVK creates a new object for the given GVK using the scheme.
+func (sc *RealSubResourceControl) newObjectForGVK(gvk schema.GroupVersionKind) (client.Object, error) {
+	obj, err := sc.scheme.New(gvk)
+	if err != nil {
+		return nil, fmt.Errorf("failed to create object for GVK %s: %w", gvk, err)
+	}
+	return obj.(client.Object), nil
 }
 
 // GetFilteredResources lists all subresources owned by the XSet.
@@ -186,8 +199,8 @@ func (sc *RealSubResourceControl) GetFilteredResources(ctx context.Context, xset
 
 	for _, adapter := range sc.adaptersByGVK {
 		gvk := adapter.Meta()
-		list := sc.newListForGVK(gvk)
-		if list == nil {
+		list, err := sc.newListForGVK(gvk)
+		if err != nil {
 			continue
 		}
 
@@ -211,18 +224,6 @@ func (sc *RealSubResourceControl) GetFilteredResources(ctx context.Context, xset
 	}
 
 	return resources, nil
-}
-
-// newListForGVK creates a new list object for the given GVK.
-func (sc *RealSubResourceControl) newListForGVK(gvk schema.GroupVersionKind) client.ObjectList {
-	switch gvk {
-	case corev1.SchemeGroupVersion.WithKind("PersistentVolumeClaim"):
-		return &corev1.PersistentVolumeClaimList{}
-	case corev1.SchemeGroupVersion.WithKind("Service"):
-		return &corev1.ServiceList{}
-	default:
-		return nil
-	}
 }
 
 // extractListItems extracts items from any ObjectList using reflection.
@@ -288,8 +289,8 @@ func (sc *RealSubResourceControl) findOrphanedResources(ctx context.Context, xse
 	}
 
 	gvk := adapter.Meta()
-	list := sc.newListForGVK(gvk)
-	if list == nil {
+	list, err := sc.newListForGVK(gvk)
+	if err != nil {
 		return nil, nil
 	}
 
@@ -560,29 +561,30 @@ func (sc *RealSubResourceControl) createResourcesForAdapter(ctx context.Context,
 		if err := sc.client.Create(ctx, resource); err != nil {
 			if apierrors.IsAlreadyExists(err) {
 				// Resource already exists — fetch and check state
-				existingResource := newObjectForGVK(gvk)
-				if existingResource != nil {
-					if getErr := sc.client.Get(ctx, client.ObjectKey{
-						Namespace: resource.GetNamespace(),
-						Name:      resource.GetName(),
-					}, existingResource); getErr != nil {
-						return fmt.Errorf("failed to get existing %s %s: %w", gvk.Kind, resource.GetName(), getErr)
-					}
-					// If the existing resource is being deleted, help it along by removing finalizers
-					if existingResource.GetDeletionTimestamp() != nil {
-						if len(existingResource.GetFinalizers()) > 0 {
-							patch := client.MergeFrom(existingResource.DeepCopyObject().(client.Object))
-							existingResource.SetFinalizers(nil)
-							if patchErr := sc.client.Patch(ctx, existingResource, patch); patchErr != nil && !apierrors.IsNotFound(patchErr) {
-								return fmt.Errorf("failed to remove finalizers from dying %s %s: %w", gvk.Kind, resource.GetName(), patchErr)
-							}
-						}
-						// Return error to requeue — the resource will be gone in the next reconcile
-						return fmt.Errorf("%s %s is being deleted, will retry on next reconcile", gvk.Kind, resource.GetName())
-					}
-					createdResources = append(createdResources, existingResource)
-					continue
+				existingResource, newObjErr := sc.newObjectForGVK(gvk)
+				if newObjErr != nil {
+					return fmt.Errorf("failed to create object for GVK %s: %w", gvk, newObjErr)
 				}
+				if getErr := sc.client.Get(ctx, client.ObjectKey{
+					Namespace: resource.GetNamespace(),
+					Name:      resource.GetName(),
+				}, existingResource); getErr != nil {
+					return fmt.Errorf("failed to get existing %s %s: %w", gvk.Kind, resource.GetName(), getErr)
+				}
+				// If the existing resource is being deleted, help it along by removing finalizers
+				if existingResource.GetDeletionTimestamp() != nil {
+					if len(existingResource.GetFinalizers()) > 0 {
+						patch := client.MergeFrom(existingResource.DeepCopyObject().(client.Object))
+						existingResource.SetFinalizers(nil)
+						if patchErr := sc.client.Patch(ctx, existingResource, patch); patchErr != nil && !apierrors.IsNotFound(patchErr) {
+							return fmt.Errorf("failed to remove finalizers from dying %s %s: %w", gvk.Kind, resource.GetName(), patchErr)
+						}
+					}
+					// Return error to requeue — the resource will be gone in the next reconcile
+					return fmt.Errorf("%s %s is being deleted, will retry on next reconcile", gvk.Kind, resource.GetName())
+				}
+				createdResources = append(createdResources, existingResource)
+				continue
 			}
 			return fmt.Errorf("failed to create %s %s: %w", gvk.Kind, resource.GetName(), err)
 		}
@@ -892,8 +894,8 @@ func (sc *RealSubResourceControl) findOrphanedResourcesForTarget(ctx context.Con
 	}
 
 	gvk := adapter.Meta()
-	list := sc.newListForGVK(gvk)
-	if list == nil {
+	list, err := sc.newListForGVK(gvk)
+	if err != nil {
 		return nil, nil
 	}
 
