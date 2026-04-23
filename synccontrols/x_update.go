@@ -38,7 +38,6 @@ import (
 	"kusionstack.io/kube-xset/api"
 	"kusionstack.io/kube-xset/opslifecycle"
 	"kusionstack.io/kube-xset/resourcecontexts"
-	"kusionstack.io/kube-xset/subresources"
 	"kusionstack.io/kube-xset/xcontrol"
 )
 
@@ -89,9 +88,9 @@ func (r *RealSyncControl) attachTargetUpdateInfo(_ context.Context, xsetObject a
 		spec := r.xsetController.GetXSetSpec(xsetObject)
 		// decide whether the TargetOpsLifecycle is during ops or not
 		updateInfo.RequeueForOperationDelay, updateInfo.IsAllowUpdateOps = opslifecycle.AllowOps(r.updateConfig.XsetLabelAnnoMgr, r.updateLifecycleAdapter, ptr.Deref(spec.UpdateStrategy.OperationDelaySeconds, 0), target)
-		// check subresource pvc template changed
-		if _, enabled := subresources.GetSubresourcePvcAdapter(r.xsetController); enabled {
-			updateInfo.PvcTmpHashChanged, err = r.pvcControl.IsTargetPvcTmpChanged(xsetObject, target.Object, syncContext.ExistingPvcs)
+		// check subresource template changed
+		if r.subResourceControl != nil {
+			updateInfo.SubResourceTemplateChanged, err = r.subResourceControl.IsTargetTemplateChanged(xsetObject, target.Object, syncContext.ExistingSubResources, updateInfo.IsUpdatedRevision)
 			if err != nil {
 				return nil, err
 			}
@@ -438,7 +437,7 @@ func (u *GenericTargetUpdater) FilterAllowOpsTargets(ctx context.Context, candid
 
 		targetInfo.IsAllowUpdateOps = true
 
-		if targetInfo.IsUpdatedRevision && !targetInfo.PvcTmpHashChanged && !targetInfo.DecorationChanged {
+		if targetInfo.IsUpdatedRevision && !targetInfo.SubResourceTemplateChanged && !targetInfo.DecorationChanged {
 			continue
 		}
 
@@ -586,7 +585,7 @@ func (u *replaceUpdateTargetUpdater) BeginUpdateTarget(ctx context.Context, sync
 func (u *replaceUpdateTargetUpdater) FilterAllowOpsTargets(_ context.Context, candidates []*TargetUpdateInfo, _ map[int]*api.ContextDetail, _ *SyncContext, targetCh chan *TargetUpdateInfo) (requeueAfter *time.Duration, err error) {
 	activeTargetToUpdate := filterOutPlaceHolderUpdateInfos(candidates)
 	for i, targetInfo := range activeTargetToUpdate {
-		if targetInfo.IsUpdatedRevision && !targetInfo.PvcTmpHashChanged && !targetInfo.DecorationChanged {
+		if targetInfo.IsUpdatedRevision && !targetInfo.SubResourceTemplateChanged && !targetInfo.DecorationChanged {
 			continue
 		}
 

@@ -42,11 +42,13 @@ type XSetController interface {
 	XOperation
 
 	// Optional interfaces:
-	// 		- LifecycleAdapterGetter
-	// 		- ResourceContextAdapterGetter
-	// 		- LabelAnnotationManagerGetter
-	// 		- SubResourcePvcAdapter
-	// 		- DecorationAdapter
+	//		- LifecycleAdapterGetter
+	//		- ResourceContextAdapterGetter
+	//		- LabelAnnotationManagerGetter
+	//		- SubResourceAdapterGetter
+	//		- SubResourcePvcAdapter
+	//		- DecorationAdapter
+	//		- TargetPrefixGetter
 }
 
 type XSetObject client.Object
@@ -85,6 +87,12 @@ type LabelAnnotationManagerGetter interface {
 	GetLabelManagerAdapter() map[XSetLabelAnnotationEnum]string
 }
 
+// SubResourceAdapterGetter is used to get subresource adapters.
+// Implement this to enable generic subresource management.
+type SubResourceAdapterGetter interface {
+	GetSubResourceAdapters() []SubResourceAdapter
+}
+
 // SubResourcePvcAdapter is used to manage pvc subresource for X, which are declared on XSet, e.g., spec.volumeClaimTemplate.
 // Once adapter is implemented, XSetController will automatically manage pvc: (1) create pvcs from GetXSetPvcTemplate for each
 // X object and attach theses pvcs with same instance-id, (2) upgrade pvcs and recreate X object pvcs when PvcTemplateChanged,
@@ -120,4 +128,12 @@ type DecorationAdapter interface {
 	GetDecorationPatcherByRevisions(ctx context.Context, c client.Client, target client.Object, revision string) (func(client.Object) error, error)
 	// IsTargetDecorationChanged returns true if decoration on target is changed.
 	IsTargetDecorationChanged(currentRevision, updatedRevision string) (bool, error)
+}
+
+// TargetPrefixGetter is used to get custom prefix for target names.
+// If not implemented or returns empty string, defaults to "{xset-name}-".
+// Controller is responsible for truncation if needed.
+// The returned prefix should end with "-" if a separator is desired.
+type TargetPrefixGetter interface {
+	GetTargetPrefix(xset XSetObject) string
 }

@@ -64,7 +64,7 @@ type SyncControl interface {
 func NewRealSyncControl(reconcileMixIn *mixin.ReconcilerMixin,
 	xsetController api.XSetController,
 	xControl xcontrol.TargetControl,
-	pvcControl subresources.PvcControl,
+	subResourceControl subresources.SubResourceControl,
 	xsetLabelAnnoManager api.XSetLabelAnnotationManager,
 	resourceContexts resourcecontexts.ResourceContextControl,
 	cacheExpectations expectations.CacheExpectationsInterface,
@@ -94,7 +94,7 @@ func NewRealSyncControl(reconcileMixIn *mixin.ReconcilerMixin,
 		xsetLabelAnnoMgr:       xsetLabelAnnoManager,
 		resourceContextControl: resourceContexts,
 		xControl:               xControl,
-		pvcControl:             pvcControl,
+		subResourceControl:     subResourceControl,
 
 		updateConfig:      updateConfig,
 		cacheExpectations: cacheExpectations,
@@ -111,7 +111,7 @@ var _ SyncControl = &RealSyncControl{}
 type RealSyncControl struct {
 	mixin.ReconcilerMixin
 	xControl               xcontrol.TargetControl
-	pvcControl             subresources.PvcControl
+	subResourceControl     subresources.SubResourceControl
 	xsetController         api.XSetController
 	xsetLabelAnnoMgr       api.XSetLabelAnnotationManager
 	resourceContextControl resourcecontexts.ResourceContextControl
@@ -151,19 +151,18 @@ func (r *RealSyncControl) SyncTargets(ctx context.Context, instance api.XSetObje
 		return false, nil
 	}
 
-	// sync subresource
-	// 1. list pvcs using ownerReference
-	// 2. adopt and retain orphaned pvcs according to PVC retention policy
-	if _, enabled := subresources.GetSubresourcePvcAdapter(r.xsetController); enabled {
-		var existingPvcs, adoptedPvcs []*corev1.PersistentVolumeClaim
-		if existingPvcs, err = r.pvcControl.GetFilteredPvcs(ctx, instance); err != nil {
-			return false, fmt.Errorf("fail to get filtered subresource PVCs: %w", err)
+	// sync subresources: list owned resources and adopt orphaned ones
+	if r.subResourceControl != nil {
+		existing, err := r.subResourceControl.GetFilteredResources(ctx, instance)
+		if err != nil {
+			return false, fmt.Errorf("fail to get filtered subresources: %w", err)
 		}
-		if adoptedPvcs, err = r.pvcControl.AdoptPvcsLeftByRetainPolicy(ctx, instance); err != nil {
-			return false, fmt.Errorf("fail to adopt orphaned left by whenDelete retention policy PVCs: %w", err)
+		adopted, err := r.subResourceControl.AdoptOrphanedResources(ctx, instance)
+		if err != nil {
+			return false, fmt.Errorf("fail to adopt orphaned subresources: %w", err)
 		}
-		syncContext.ExistingPvcs = append(syncContext.ExistingPvcs, existingPvcs...)
-		syncContext.ExistingPvcs = append(syncContext.ExistingPvcs, adoptedPvcs...)
+		existing = append(existing, adopted...)
+		syncContext.ExistingSubResources = existing
 	}
 
 	// sync include exclude targets
@@ -227,11 +226,12 @@ func (r *RealSyncControl) SyncTargets(ctx context.Context, instance api.XSetObje
 			}
 		}
 
-		// delete unused pvcs
-		if _, enabled := subresources.GetSubresourcePvcAdapter(r.xsetController); enabled {
-			err = r.pvcControl.DeleteTargetUnusedPvcs(ctx, instance, target, syncContext.ExistingPvcs)
-			if err != nil {
-				return false, fmt.Errorf("fail to delete unused pvcs %w", err)
+		// delete unused subresources only when the target is being removed/recreated.
+		// Active targets may still reference subresources that are no longer present in the
+		// latest spec until the target is actually recreated.
+		if r.subResourceControl != nil && (target.GetDeletionTimestamp() != nil || targetDuringReplace(r.xsetLabelAnnoMgr, target)) {
+			if err = r.subResourceControl.DeleteTargetUnusedResources(ctx, instance, target, syncContext.ExistingSubResources); err != nil {
+				return false, fmt.Errorf("fail to delete unused subresources: %w", err)
 			}
 		}
 
@@ -389,31 +389,18 @@ func (r *RealSyncControl) allowIncludeExcludeTargets(ctx context.Context, xset a
 			continue
 		}
 
-		// check allowance for subresource
-		pvcsAllowed := true
-		if adapter, enabled := subresources.GetSubresourcePvcAdapter(r.xsetController); enabled {
-			volumes := adapter.GetXSpecVolumes(target)
-			for i := range volumes {
-				volume := volumes[i]
-				if volume.PersistentVolumeClaim == nil {
-					continue
-				}
-				pvc := &corev1.PersistentVolumeClaim{}
-				err = r.Client.Get(ctx, types.NamespacedName{Namespace: target.GetNamespace(), Name: volume.PersistentVolumeClaim.ClaimName}, pvc)
-				// if pvc not found, ignore it. In case of pvc is filtered by controller-mesh
-				if apierrors.IsNotFound(err) {
-					continue
-				} else if err != nil {
-					r.Recorder.Eventf(target, corev1.EventTypeWarning, "ExcludeIncludeNotAllowed", fmt.Sprintf("failed to check allowed to exclude/include from/to xset %s/%s: %s", xset.GetNamespace(), xset.GetName(), err.Error()))
-					pvcsAllowed = false
-				}
-				if allowed, reason := fn(pvc, xset.GetName(), xset.GetObjectKind().GroupVersionKind().Kind, labelMgr); !allowed {
-					r.Recorder.Eventf(target, corev1.EventTypeWarning, "ExcludeIncludeNotAllowed", fmt.Sprintf("failed to check allowed to exclude/include from/to xset %s/%s: %s", xset.GetNamespace(), xset.GetName(), reason))
-					pvcsAllowed = false
-				}
+		// check allowance for subresources
+		subResourcesAllowed := true
+		if r.subResourceControl != nil {
+			allowed, checkErr := r.subResourceControl.CheckAllowIncludeExclude(ctx, xset, target, subresources.CheckAllowFunc(fn))
+			if checkErr != nil {
+				r.Recorder.Eventf(target, corev1.EventTypeWarning, "ExcludeIncludeNotAllowed", fmt.Sprintf("failed to check subresource allowed to exclude/include from/to xset %s/%s: %s", xset.GetNamespace(), xset.GetName(), checkErr.Error()))
+				subResourcesAllowed = false
+			} else if !allowed {
+				subResourcesAllowed = false
 			}
 		}
-		if pvcsAllowed {
+		if subResourcesAllowed {
 			allowTargets.Insert(targetName)
 		} else {
 			notAllowTargets.Insert(targetName)
@@ -575,11 +562,10 @@ func (r *RealSyncControl) Scale(ctx context.Context, xsetObject api.XSetObject, 
 				if err != nil {
 					return apierrors.NewInvalid(schema.GroupKind{Group: r.targetGVK.Group, Kind: r.targetGVK.Kind}, target.GetGenerateName(), []*field.Error{{Detail: err.Error()}})
 				}
-				// create pvcs for targets (pod)
-				if _, enabled := subresources.GetSubresourcePvcAdapter(r.xsetController); enabled {
-					err = r.pvcControl.CreateTargetPvcs(ctx, xsetObject, target, syncContext.ExistingPvcs)
-					if err != nil {
-						return fmt.Errorf("fail to create PVCs for target %s: %w", target.GetName(), err)
+				// create subresources for targets
+				if r.subResourceControl != nil {
+					if err = r.subResourceControl.CreateTargetResources(ctx, xsetObject, target, syncContext.ExistingSubResources); err != nil {
+						return fmt.Errorf("fail to create subresources for target %s: %w", target.GetName(), err)
 					}
 				}
 				newTarget := target.DeepCopyObject().(client.Object)
@@ -604,6 +590,15 @@ func (r *RealSyncControl) Scale(ctx context.Context, xsetObject api.XSetObject, 
 			}
 			r.Recorder.Eventf(xsetObject, corev1.EventTypeNormal, "Scaled", "scale out %d Target(s)", succCount)
 			AddOrUpdateCondition(syncContext.NewStatus, api.XSetScale, nil, "Scaled", "")
+
+			// Refresh ExistingSubResources after scale-out so that Update phase
+			// sees newly created subresources and doesn't treat them as missing.
+			if r.subResourceControl != nil && succCount > 0 {
+				if refreshed, refreshErr := r.subResourceControl.GetFilteredResources(ctx, xsetObject); refreshErr == nil {
+					syncContext.ExistingSubResources = refreshed
+				}
+			}
+
 			return succCount > 0, recordedRequeueAfter, err
 		}
 	}
@@ -703,13 +698,12 @@ func (r *RealSyncControl) Scale(ctx context.Context, xsetObject api.XSetObject, 
 				return err
 			}
 
-			// delete pvcs if target is in update replace, or retention policy is "Deleted"
-			if _, enabled := subresources.GetSubresourcePvcAdapter(r.xsetController); enabled {
+			// delete subresources if target is in update replace, or retention policy is "Delete"
+			if r.subResourceControl != nil {
 				_, replaceOrigin := r.xsetLabelAnnoMgr.Get(target.Object, api.XReplacePairOriginName)
 				_, replaceNew := r.xsetLabelAnnoMgr.Get(target.Object, api.XReplacePairNewId)
-				if replaceOrigin || replaceNew || !r.pvcControl.RetainPvcWhenXSetScaled(xsetObject) {
-					return r.pvcControl.DeleteTargetPvcs(ctx, xsetObject, target.Object, syncContext.ExistingPvcs)
-				}
+				isReplaceTarget := replaceOrigin || replaceNew
+				return r.subResourceControl.DeleteTargetResources(ctx, xsetObject, target.Object, syncContext.ExistingSubResources, isReplaceTarget)
 			}
 			return nil
 		})
@@ -773,7 +767,7 @@ func (r *RealSyncControl) Update(ctx context.Context, xsetObject api.XSetObject,
 	// 3. filter already updated revision,
 	for i, targetInfo := range targetToUpdate {
 		// TODO check decoration and pvc template changed
-		if targetInfo.IsUpdatedRevision && !targetInfo.PvcTmpHashChanged && !targetInfo.DecorationChanged {
+		if targetInfo.IsUpdatedRevision && !targetInfo.SubResourceTemplateChanged && !targetInfo.DecorationChanged {
 			continue
 		}
 
@@ -824,6 +818,27 @@ func (r *RealSyncControl) Update(ctx context.Context, xsetObject api.XSetObject,
 			"inPlaceUpdate", targetInfo.InPlaceUpdateSupport,
 			"onlyMetadataChanged", targetInfo.OnlyMetadataChanged,
 		)
+
+		// Delete subresources that need recreation before the pod is deleted.
+		// This ensures fresh subresources are created in the next reconcile's scale-out,
+		// avoiding cache staleness issues from delete+create in the same reconcile.
+		if targetInfo.SubResourceTemplateChanged && r.subResourceControl != nil {
+			if err := r.subResourceControl.DeleteTargetRecreateResources(ctx, xsetObject, targetInfo.Object, syncContext.ExistingSubResources); err != nil {
+				return err
+			}
+			// Remove deleted resources from ExistingSubResources so scale-out
+			// doesn't try to reuse resources that were just deleted.
+			targetID, _ := r.xsetLabelAnnoMgr.Get(targetInfo.Object, api.XInstanceIdLabelKey)
+			filtered := syncContext.ExistingSubResources[:0]
+			for _, state := range syncContext.ExistingSubResources {
+				resourceID, _ := r.xsetLabelAnnoMgr.Get(state.Object, api.XInstanceIdLabelKey)
+				if resourceID == targetID && state.Adapter != nil && state.Adapter.RecreateWhenXSetUpdated(xsetObject) {
+					continue // skip deleted resource
+				}
+				filtered = append(filtered, state)
+			}
+			syncContext.ExistingSubResources = filtered
+		}
 
 		spec := r.xsetController.GetXSetSpec(xsetObject)
 		if targetInfo.IsInReplace && spec.UpdateStrategy.UpdatePolicy != api.XSetReplaceTargetUpdateStrategyType {
@@ -1057,16 +1072,72 @@ func targetDuringReplace(labelMgr api.XSetLabelAnnotationManager, target client.
 	return replaceIndicate || replaceOriginTarget || replaceNewTarget
 }
 
-// BatchDeleteTargetsByLabel try to trigger target deletion by to-delete label
+// BatchDeleteTargetsByLabel triggers target deletion following the same lifecycle pattern as scale-in.
+// It triggers TargetOpsLifecycle, waits for permission, then directly deletes the targets.
+// Any deletion-related subresource cleanup (including PVC reclamation) is handled separately through
+// SubResourceControl/ReclaimSubResourcesOnDeletion rather than in this method.
 func (r *RealSyncControl) BatchDeleteTargetsByLabel(ctx context.Context, targetControl xcontrol.TargetControl, needDeleteTargets []client.Object) error {
+	logger := logr.FromContext(ctx)
+
+	// Step 1: Trigger TargetOpsLifecycle for targets not already in lifecycle
 	_, err := controllerutils.SlowStartBatch(len(needDeleteTargets), controllerutils.SlowStartInitialBatchSize, false, func(i int, _ error) error {
 		target := needDeleteTargets[i]
-		if _, exist := r.xsetLabelAnnoMgr.Get(target, api.XDeletionIndicationLabelKey); !exist {
-			patch := client.RawPatch(types.MergePatchType, []byte(fmt.Sprintf(`{"metadata":{"labels":{"%s":"%d"}}}`, r.xsetLabelAnnoMgr.Value(api.XDeletionIndicationLabelKey), time.Now().UnixNano()))) // nolint
-			if err := targetControl.PatchTarget(ctx, target, patch); err != nil {
-				return fmt.Errorf("failed to delete target when syncTargets %s/%s/%w", target.GetNamespace(), target.GetName(), err)
+
+		// Skip if already being deleted
+		if target.GetDeletionTimestamp() != nil {
+			return nil
+		}
+
+		// Check if already during scale-in ops (has preparing-delete label)
+		if _, duringOps := r.xsetLabelAnnoMgr.Get(target, api.PreparingDeleteLabel); duringOps {
+			return nil
+		}
+
+		// Trigger TargetOpsLifecycle with scaleIn OperationType
+		logger.V(1).Info("try to begin TargetOpsLifecycle for deleting Target in XSet", "target", ObjectKeyString(target))
+		if updated, err := opslifecycle.Begin(ctx, r.xsetLabelAnnoMgr, r.Client, r.scaleInLifecycleAdapter, target); err != nil {
+			return fmt.Errorf("fail to begin TargetOpsLifecycle for deleting Target %s/%s: %w", target.GetNamespace(), target.GetName(), err)
+		} else if updated {
+			r.Recorder.Eventf(target, corev1.EventTypeNormal, "BeginDeleteLifecycle", "succeed to begin TargetOpsLifecycle for deletion")
+			// add an expectation for this target update, before next reconciling
+			if err := r.cacheExpectations.ExpectUpdation(clientutil.ObjectKeyString(target), r.targetGVK, target.GetNamespace(), target.GetName(), target.GetResourceVersion()); err != nil {
+				return err
 			}
 		}
+
+		return nil
+	})
+	if err != nil {
+		return err
+	}
+
+	// Step 2: Check AllowOps and delete targets that are allowed
+	_, err = controllerutils.SlowStartBatch(len(needDeleteTargets), controllerutils.SlowStartInitialBatchSize, false, func(i int, _ error) error {
+		target := needDeleteTargets[i]
+
+		// Skip if already being deleted
+		if target.GetDeletionTimestamp() != nil {
+			return nil
+		}
+
+		// Check if operation is allowed (no delay for deletion, pass 0)
+		_, allowed := opslifecycle.AllowOps(r.xsetLabelAnnoMgr, r.scaleInLifecycleAdapter, 0, target)
+		if !allowed {
+			logger.V(1).Info("target not yet allowed to delete, waiting for lifecycle", "target", ObjectKeyString(target))
+			return nil
+		}
+
+		// Delete the target
+		logger.Info("deleting target for XSet deletion", "target", ObjectKeyString(target))
+		if err := targetControl.DeleteTarget(ctx, target); err != nil {
+			return fmt.Errorf("failed to delete target %s/%s: %w", target.GetNamespace(), target.GetName(), err)
+		}
+
+		r.Recorder.Eventf(target, corev1.EventTypeNormal, "TargetDeleted", "succeed to delete target for XSet deletion")
+		if err := r.cacheExpectations.ExpectDeletion(clientutil.ObjectKeyString(target), r.targetGVK, target.GetNamespace(), target.GetName()); err != nil {
+			return err
+		}
+
 		return nil
 	})
 	return err

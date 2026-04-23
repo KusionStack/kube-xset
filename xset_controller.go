@@ -61,7 +61,7 @@ type xSetCommonReconciler struct {
 	// reconcile logic helpers
 	cacheExpectations      *expectations.CacheExpectations
 	targetControl          xcontrol.TargetControl
-	pvcControl             subresources.PvcControl
+	subResourceControl     subresources.SubResourceControl
 	syncControl            synccontrols.SyncControl
 	revisionManager        history.HistoryManager
 	resourceContextControl resourcecontexts.ResourceContextControl
@@ -90,11 +90,14 @@ func SetUpWithManager(mgr ctrl.Manager, xsetController api.XSetController) error
 	}
 	cacheExpectations := expectations.NewxCacheExpectations(reconcilerMixin.Client, reconcilerMixin.Scheme, clock.RealClock{})
 	resourceContextControl := resourcecontexts.NewRealResourceContextControl(reconcilerMixin, xsetController, resourceContextAdapter, resourceContextGVK, cacheExpectations, xsetLabelManager)
-	pvcControl, err := subresources.NewRealPvcControl(reconcilerMixin, cacheExpectations, xsetLabelManager, xsetController)
+	adapters := subresources.BuildAdapters(xsetController, xsetLabelManager)
+	subResourceControl, err := subresources.NewRealSubResourceControl(
+		reconcilerMixin, adapters, cacheExpectations, xsetLabelManager, xsetController,
+	)
 	if err != nil {
-		return errors.New("failed to create pvc control")
+		return fmt.Errorf("failed to create subresource control: %w", err)
 	}
-	syncControl := synccontrols.NewRealSyncControl(reconcilerMixin, xsetController, targetControl, pvcControl, xsetLabelManager, resourceContextControl, cacheExpectations)
+	syncControl := synccontrols.NewRealSyncControl(reconcilerMixin, xsetController, targetControl, subResourceControl, xsetLabelManager, resourceContextControl, cacheExpectations)
 	revisionControl := history.NewRevisionControl(reconcilerMixin.Client, reconcilerMixin.Client)
 	revisionOwner := revisionowner.NewRevisionOwner(xsetController, targetControl)
 	revisionManager := history.NewHistoryManager(revisionControl, revisionOwner)
@@ -105,7 +108,7 @@ func SetUpWithManager(mgr ctrl.Manager, xsetController api.XSetController) error
 		XSetController:         xsetController,
 		meta:                   xsetController.XSetMeta(),
 		finalizerName:          xsetController.FinalizerName(),
-		pvcControl:             pvcControl,
+		subResourceControl:     subResourceControl,
 		syncControl:            syncControl,
 		revisionManager:        revisionManager,
 		resourceContextControl: resourceContextControl,
@@ -302,39 +305,10 @@ func (r *xSetCommonReconciler) releaseResourcesForDeletion(ctx context.Context, 
 }
 
 func (r *xSetCommonReconciler) ensureReclaimTargetSubResources(ctx context.Context, xset api.XSetObject) error {
-	if _, enabled := subresources.GetSubresourcePvcAdapter(r.XSetController); enabled {
-		err := r.ensureReclaimPvcs(ctx, xset)
-		if err != nil {
-			return err
-		}
-	}
-	return nil
-}
-
-// ensureReclaimPvcs removes xset ownerReference from pvcs if RetainPvcWhenXSetDeleted.
-// This allows pvcs to be retained for other xsets with same pvc template.
-func (r *xSetCommonReconciler) ensureReclaimPvcs(ctx context.Context, xset api.XSetObject) error {
-	if !r.pvcControl.RetainPvcWhenXSetDeleted(xset) {
+	if r.subResourceControl == nil {
 		return nil
 	}
-	var needReclaimPvcs []*corev1.PersistentVolumeClaim
-	pvcs, err := r.pvcControl.GetFilteredPvcs(ctx, xset)
-	if err != nil {
-		return err
-	}
-	// reclaim pvcs if RetainPvcWhenXSetDeleted
-	for i := range pvcs {
-		owned := pvcs[i].OwnerReferences != nil && len(pvcs[i].OwnerReferences) > 0
-		if owned {
-			needReclaimPvcs = append(needReclaimPvcs, pvcs[i])
-		}
-	}
-	for i := range needReclaimPvcs {
-		if err := r.pvcControl.OrphanPvc(ctx, xset, needReclaimPvcs[i]); err != nil {
-			return err
-		}
-	}
-	return nil
+	return r.subResourceControl.ReclaimSubResourcesOnDeletion(ctx, xset)
 }
 
 func (r *xSetCommonReconciler) ensureReclaimTargetsDeletion(ctx context.Context, instance api.XSetObject) (bool, error) {
