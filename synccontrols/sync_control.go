@@ -225,8 +225,10 @@ func (r *RealSyncControl) SyncTargets(ctx context.Context, instance api.XSetObje
 			}
 		}
 
-		// delete unused subresources
-		if r.subResourceControl != nil {
+		// delete unused subresources only when the target is being removed/recreated.
+		// Active targets may still reference subresources that are no longer present in the
+		// latest spec until the target is actually recreated.
+		if r.subResourceControl != nil && (target.GetDeletionTimestamp() != nil || targetDuringReplace(r.xsetLabelAnnoMgr, target)) {
 			if err = r.subResourceControl.DeleteTargetUnusedResources(ctx, instance, target, syncContext.ExistingSubResources); err != nil {
 				return false, fmt.Errorf("fail to delete unused subresources: %w", err)
 			}
@@ -1071,7 +1073,8 @@ func targetDuringReplace(labelMgr api.XSetLabelAnnotationManager, target client.
 
 // BatchDeleteTargetsByLabel triggers target deletion following the same lifecycle pattern as scale-in.
 // It triggers TargetOpsLifecycle, waits for permission, then directly deletes the targets.
-// Note: PVC cleanup is handled separately by ensureReclaimPvcs in xset_controller.go.
+// Any deletion-related subresource cleanup (including PVC reclamation) is handled separately through
+// SubResourceControl/ReclaimSubResourcesOnDeletion rather than in this method.
 func (r *RealSyncControl) BatchDeleteTargetsByLabel(ctx context.Context, targetControl xcontrol.TargetControl, needDeleteTargets []client.Object) error {
 	logger := logr.FromContext(ctx)
 

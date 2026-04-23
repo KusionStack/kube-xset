@@ -157,7 +157,7 @@ func setUpCacheForAdapters(cache cache.Cache, scheme *runtime.Scheme, adapters [
 		gvk := adapter.Meta()
 		obj, err := scheme.New(gvk)
 		if err != nil {
-			continue // Skip unknown GVKs
+			return fmt.Errorf("failed to set up cache for adapter GVK %s: type is not registered in the scheme; ensure this type is added to the controller scheme: %w", gvk, err)
 		}
 		if err := cache.IndexField(context.TODO(), obj.(client.Object), FieldIndexOwnerRefUID, func(object client.Object) []string {
 			ownerRef := metav1.GetControllerOf(object)
@@ -438,6 +438,10 @@ func (sc *RealSubResourceControl) ReclaimSubResourcesOnDeletion(ctx context.Cont
 }
 
 // deleteResource deletes a subresource and tracks the expectation.
+// Note: This function removes finalizers before deletion to ensure immediate removal.
+// This is a trade-off between safety and speed. For PVCs with kubernetes.io/pvc-protection,
+// this bypasses the protection that prevents deletion while still mounted.
+// TODO: Consider making finalizer removal opt-in per adapter or checking if resource is in use.
 func (sc *RealSubResourceControl) deleteResource(ctx context.Context, xset api.XSetObject, resource client.Object, gvk schema.GroupVersionKind) error {
 	// Remove finalizers before deleting to ensure immediate removal from etcd.
 	// Without this, resources with finalizers (e.g., PVCs with kubernetes.io/pvc-protection)
@@ -634,8 +638,13 @@ func (sc *RealSubResourceControl) DeleteTargetResources(ctx context.Context, xse
 
 // DeleteTargetUnusedResources deletes unused subresources for a target.
 // It classifies resources into new/old by hash and deletes:
-// - unclaimed old resources
-// - old resources if not retaining on scale
+// - unclaimed old resources (templates removed from XSet)
+// - old resources if not retaining on scale and new version exists
+//
+// IMPORTANT: This should only be called when the target is being deleted or replaced.
+// A template may be removed from the XSet while an existing target still references
+// the previously created subresource until that target is recreated or updated.
+// Calling this on active targets can delete in-use resources and break workloads.
 func (sc *RealSubResourceControl) DeleteTargetUnusedResources(ctx context.Context, xset api.XSetObject, target client.Object, existing []SubResourceState) error {
 	targetID, exist := sc.labelAnnoMgr.Get(target, api.XInstanceIdLabelKey)
 	if !exist {

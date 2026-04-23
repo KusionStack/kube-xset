@@ -23,6 +23,7 @@ import (
 
 	appsv1 "k8s.io/api/apps/v1"
 	"k8s.io/apimachinery/pkg/api/meta"
+	apimachineryvalidation "k8s.io/apimachinery/pkg/api/validation"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	clientutils "kusionstack.io/kube-utils/client"
 	controllerutils "kusionstack.io/kube-utils/controller/utils"
@@ -105,12 +106,17 @@ func AddOrUpdateCondition(status *api.XSetStatus, conditionType api.XSetConditio
 }
 
 // GetTargetsPrefix returns the prefix for target names.
-// If override is non-empty, uses it; otherwise uses controllerName.
+// If override is non-empty, uses it; otherwise uses controllerName with DNS validation.
 func GetTargetsPrefix(override, controllerName string) string {
 	if override != "" {
 		return override
 	}
-	return fmt.Sprintf("%s-", controllerName)
+	// use the dash (if the name isn't too long) to make the target name a bit prettier
+	prefix := fmt.Sprintf("%s-", controllerName)
+	if len(apimachineryvalidation.NameIsDNSSubdomain(prefix, true)) != 0 {
+		prefix = controllerName
+	}
+	return prefix
 }
 
 func IsTargetUpdatedRevision(target client.Object, revision string) bool {
