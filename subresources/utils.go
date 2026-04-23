@@ -45,7 +45,8 @@ func TemplateHash(obj interface{}) (string, error) {
 func ObjectKeyString(obj interface {
 	GetNamespace() string
 	GetName() string
-}) string {
+},
+) string {
 	if obj.GetNamespace() == "" {
 		return obj.GetName()
 	}

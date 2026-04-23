@@ -272,14 +272,16 @@ func (sc *RealSubResourceControl) findOrphanedResources(ctx context.Context, xse
 		ownerSelector.MatchLabels = map[string]string{}
 	}
 	ownerSelector.MatchLabels[sc.labelAnnoMgr.Value(api.ControlledByXSetLabel)] = "true"
-	ownerSelector.MatchExpressions = append(ownerSelector.MatchExpressions, metav1.LabelSelectorRequirement{
-		Key:      sc.labelAnnoMgr.Value(api.XOrphanedIndicationLabelKey),
-		Operator: metav1.LabelSelectorOpDoesNotExist,
-	})
-	ownerSelector.MatchExpressions = append(ownerSelector.MatchExpressions, metav1.LabelSelectorRequirement{
-		Key:      sc.labelAnnoMgr.Value(api.XInstanceIdLabelKey),
-		Operator: metav1.LabelSelectorOpExists,
-	})
+	ownerSelector.MatchExpressions = append(ownerSelector.MatchExpressions,
+		metav1.LabelSelectorRequirement{
+			Key:      sc.labelAnnoMgr.Value(api.XOrphanedIndicationLabelKey),
+			Operator: metav1.LabelSelectorOpDoesNotExist,
+		},
+		metav1.LabelSelectorRequirement{
+			Key:      sc.labelAnnoMgr.Value(api.XInstanceIdLabelKey),
+			Operator: metav1.LabelSelectorOpExists,
+		},
+	)
 
 	selector, err := metav1.LabelSelectorAsSelector(ownerSelector)
 	if err != nil {
@@ -922,8 +924,8 @@ func (sc *RealSubResourceControl) findOrphanedResourcesForTarget(ctx context.Con
 			if pvcAdapter, ok := sc.xsetController.(api.SubResourcePvcAdapter); ok {
 				volumes := pvcAdapter.GetXSpecVolumes(target)
 				isMounted := false
-				for _, v := range volumes {
-					if v.PersistentVolumeClaim != nil && v.PersistentVolumeClaim.ClaimName == item.GetName() {
+				for i := range volumes {
+					if volumes[i].PersistentVolumeClaim != nil && volumes[i].PersistentVolumeClaim.ClaimName == item.GetName() {
 						isMounted = true
 						break
 					}

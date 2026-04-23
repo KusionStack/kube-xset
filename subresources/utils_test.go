@@ -19,10 +19,9 @@ package subresources
 import (
 	"testing"
 
+	"github.com/onsi/gomega"
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-
-	"github.com/onsi/gomega"
 )
 
 func TestTemplateHash(t *testing.T) {
@@ -192,7 +191,7 @@ func TestNameTruncator_Truncate(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			result := truncator.Truncate(tt.input)
-			g.Expect(len(result)).To(gomega.Equal(tt.expected))
+			g.Expect(result).To(gomega.HaveLen(tt.expected))
 		})
 	}
 }
@@ -206,7 +205,7 @@ func TestNameTruncator_TruncateWithMax(t *testing.T) {
 	g.Expect(result).To(gomega.Equal("short"))
 
 	result = truncator.TruncateWithMax("this-is-longer-than-ten", 10)
-	g.Expect(len(result)).To(gomega.Equal(10))
+	g.Expect(result).To(gomega.HaveLen(10))
 }
 
 func TestNameTruncator_TruncateLabelValue(t *testing.T) {
@@ -220,7 +219,7 @@ func TestNameTruncator_TruncateLabelValue(t *testing.T) {
 	// Long label value truncated to 63
 	longValue := "this-is-a-very-long-label-value-that-exceeds-kubernetes-limit-of-63-characters-for-labels"
 	result = truncator.TruncateLabelValue(longValue)
-	g.Expect(len(result)).To(gomega.Equal(63))
+	g.Expect(result).To(gomega.HaveLen(63))
 }
 
 func TestNameTruncator_HashUniqueness(t *testing.T) {
@@ -268,7 +267,7 @@ func TestLabelManager_SetLabel(t *testing.T) {
 	// Set label with long value
 	longValue := "this-is-a-very-long-label-value-that-exceeds-kubernetes-limit-of-63-characters"
 	lm.SetLabel(obj, "long-key", longValue)
-	g.Expect(len(obj.Labels["long-key"])).To(gomega.Equal(63))
+	g.Expect(obj.Labels["long-key"]).To(gomega.HaveLen(63))
 }
 
 func TestLabelManager_SetLabelWithTrackedOriginal(t *testing.T) {
@@ -290,7 +289,7 @@ func TestLabelManager_SetLabelWithTrackedOriginal(t *testing.T) {
 	// Long value - annotation tracks original
 	longValue := "this-is-a-very-long-label-value-that-exceeds-kubernetes-limit-of-63-characters"
 	lm.SetLabelWithTrackedOriginal(obj, "long-key", longValue)
-	g.Expect(len(obj.Labels["long-key"])).To(gomega.Equal(63))
+	g.Expect(obj.Labels["long-key"]).To(gomega.HaveLen(63))
 	g.Expect(obj.Annotations["long-key.original"]).To(gomega.Equal(longValue))
 }
 

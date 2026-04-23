@@ -161,16 +161,16 @@ func (p *PvcSubResourceAdapter) AttachToTarget(ctx context.Context, target clien
 	}
 
 	existingVolumes := pvcAdapter.GetXSpecVolumes(target)
-	volumeMap := make(map[string]corev1.Volume)
-	for _, v := range existingVolumes {
-		volumeMap[v.Name] = v
+	volumeMap := make(map[string]corev1.Volume, len(existingVolumes)+len(volumes))
+	for i := range existingVolumes {
+		volumeMap[existingVolumes[i].Name] = existingVolumes[i]
 	}
-	for _, v := range volumes {
-		volumeMap[v.Name] = v
+	for i := range volumes {
+		volumeMap[volumes[i].Name] = volumes[i]
 	}
 
-	var mergedVolumes []corev1.Volume
-	for _, v := range volumeMap {
+	mergedVolumes := make([]corev1.Volume, 0, len(volumeMap))
+	for _, v := range volumeMap { //nolint:gocritic // unavoidable when building slice from map values
 		mergedVolumes = append(mergedVolumes, v)
 	}
 

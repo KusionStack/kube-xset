@@ -20,13 +20,13 @@ import (
 	"context"
 	"testing"
 
+	"github.com/onsi/gomega"
 	appsv1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime/schema"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
-	"github.com/onsi/gomega"
 	"kusionstack.io/kube-xset/api"
 )
 
@@ -38,6 +38,7 @@ func (m *mockControllerWithoutAdapters) FinalizerName() string  { return "mock/f
 func (m *mockControllerWithoutAdapters) XSetMeta() metav1.TypeMeta {
 	return metav1.TypeMeta{Kind: "MockSet", APIVersion: "v1"}
 }
+
 func (m *mockControllerWithoutAdapters) XMeta() metav1.TypeMeta {
 	return metav1.TypeMeta{Kind: "Mock", APIVersion: "v1"}
 }
@@ -46,23 +47,30 @@ func (m *mockControllerWithoutAdapters) NewXObject() client.Object     { return 
 func (m *mockControllerWithoutAdapters) NewXObjectList() client.ObjectList {
 	return &corev1.PodList{}
 }
+
 func (m *mockControllerWithoutAdapters) GetXSetSpec(object api.XSetObject) *api.XSetSpec {
 	return nil
 }
+
 func (m *mockControllerWithoutAdapters) GetXSetPatch(object metav1.Object) ([]byte, error) {
 	return nil, nil
 }
+
 func (m *mockControllerWithoutAdapters) GetXSetStatus(object api.XSetObject) *api.XSetStatus {
 	return nil
 }
+
 func (m *mockControllerWithoutAdapters) SetXSetStatus(object api.XSetObject, status *api.XSetStatus) {
 }
+
 func (m *mockControllerWithoutAdapters) UpdateScaleStrategy(ctx context.Context, c client.Client, object api.XSetObject, scaleStrategy *api.ScaleStrategy) error {
 	return nil
 }
+
 func (m *mockControllerWithoutAdapters) GetXSetTemplatePatcher(object metav1.Object) func(client.Object) error {
 	return nil
 }
+
 func (m *mockControllerWithoutAdapters) GetXObjectFromRevision(revision *appsv1.ControllerRevision) (client.Object, error) {
 	return nil, nil
 }
@@ -75,6 +83,7 @@ func (m *mockControllerWithoutAdapters) CheckInactive(object client.Object) bool
 func (m *mockControllerWithoutAdapters) GetXOpsPriority(ctx context.Context, c client.Client, object client.Object) (*api.OpsPriority, error) {
 	return nil, nil
 }
+
 func (m *mockControllerWithoutAdapters) GetTargetPrefix(xset api.XSetObject) string {
 	return ""
 }
@@ -87,18 +96,23 @@ type mockControllerWithPvcAdapter struct {
 func (m *mockControllerWithPvcAdapter) RetainPvcWhenXSetDeleted(object api.XSetObject) bool {
 	return true
 }
+
 func (m *mockControllerWithPvcAdapter) RetainPvcWhenXSetScaled(object api.XSetObject) bool {
 	return false
 }
+
 func (m *mockControllerWithPvcAdapter) GetXSetPvcTemplate(object api.XSetObject) []corev1.PersistentVolumeClaim {
 	return nil
 }
+
 func (m *mockControllerWithPvcAdapter) GetXSpecVolumes(object client.Object) []corev1.Volume {
 	return nil
 }
+
 func (m *mockControllerWithPvcAdapter) GetXVolumeMounts(object client.Object) []corev1.VolumeMount {
 	return nil
 }
+
 func (m *mockControllerWithPvcAdapter) SetXSpecVolumes(object client.Object, pvcs []corev1.Volume) {
 }
 
@@ -108,6 +122,7 @@ type mockSubResourceAdapter struct{}
 func (m *mockSubResourceAdapter) Meta() schema.GroupVersionKind {
 	return schema.GroupVersionKind{Group: "test", Version: "v1", Kind: "MockResource"}
 }
+
 func (m *mockSubResourceAdapter) GetTemplates(xset api.XSetObject) ([]api.SubResourceTemplate, error) {
 	return nil, nil
 }

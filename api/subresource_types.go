@@ -70,7 +70,7 @@ type SubResourceAdapter interface {
 //   - Customize spec fields
 //   - Propagate additional labels from xset
 type SubResourceDecorator interface {
-	DecorateResource(ctx context.Context, xset XSetObject, template SubResourceTemplate, resource client.Object, target client.Object, targetID string) error
+	DecorateResource(ctx context.Context, xset XSetObject, template SubResourceTemplate, resource, target client.Object, targetID string) error
 }
 
 // SubResourceTemplate represents a parsed template with name and hash
@@ -83,4 +83,3 @@ type SubResourceTemplate struct {
 	// Template is the parsed template object
 	Template client.Object
 }
-
