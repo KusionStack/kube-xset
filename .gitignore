@@ -31,3 +31,11 @@ go.work.sum
 # Editor/IDE
 .idea/
 .vscode/
+
+# Worktrees
+.worktrees/
+
+# Superpowers plans (local planning artifacts)
+docs/superpowers/plans/
+docs/superpowers/
+.envrc

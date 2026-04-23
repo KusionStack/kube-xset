@@ -88,10 +88,20 @@ const (
 	// XExcludeIndicationLabelKey is used to indicate a target is excluded by xset
 	XExcludeIndicationLabelKey
 
-	// SubResourcePvcTemplateLabelKey is used to attach pvc template name to pvc resources
+	// SubResourceTemplateLabelKey is used to attach template name to subresources.
+	// This is the generic name; SubResourcePvcTemplateLabelKey is deprecated but still works.
+	SubResourceTemplateLabelKey
+
+	// SubResourceTemplateHashLabelKey is used to attach hash of template spec to subresources.
+	// This is the generic name; SubResourcePvcTemplateHashLabelKey is deprecated but still works.
+	SubResourceTemplateHashLabelKey
+
+	// SubResourcePvcTemplateLabelKey is used to attach pvc template name to pvc resources.
+	// Deprecated: Use SubResourceTemplateLabelKey instead.
 	SubResourcePvcTemplateLabelKey
 
-	// SubResourcePvcTemplateHashLabelKey is used to attach hash of pvc template to pvc subresource
+	// SubResourcePvcTemplateHashLabelKey is used to attach hash of pvc template to pvc subresource.
+	// Deprecated: Use SubResourceTemplateHashLabelKey instead.
 	SubResourcePvcTemplateHashLabelKey
 
 	// wellKnownCount is the number of XSetLabelAnnotationEnum
@@ -125,6 +135,8 @@ var defaultXSetLabelAnnotationManager = map[XSetLabelAnnotationEnum]string{
 	XCreatingLabel:                     appsv1alpha1.PodCreatingLabel,
 	XCompletingLabel:                   appsv1alpha1.PodCompletingLabel,
 	XExcludeIndicationLabelKey:         appsv1alpha1.PodExcludeIndicationLabelKey,
+	SubResourceTemplateLabelKey:        appsv1alpha1.PvcTemplateLabelKey,
+	SubResourceTemplateHashLabelKey:    appsv1alpha1.PvcTemplateHashLabelKey,
 	SubResourcePvcTemplateLabelKey:     appsv1alpha1.PvcTemplateLabelKey,
 	SubResourcePvcTemplateHashLabelKey: appsv1alpha1.PvcTemplateHashLabelKey,
 }
