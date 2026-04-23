@@ -438,24 +438,12 @@ func (sc *RealSubResourceControl) ReclaimSubResourcesOnDeletion(ctx context.Cont
 }
 
 // deleteResource deletes a subresource and tracks the expectation.
-// Note: This function removes finalizers before deletion to ensure immediate removal.
-// This is a trade-off between safety and speed. For PVCs with kubernetes.io/pvc-protection,
-// this bypasses the protection that prevents deletion while still mounted.
-// TODO: Consider making finalizer removal opt-in per adapter or checking if resource is in use.
+// It issues a normal delete and lets Kubernetes handle finalizers naturally.
+// Resources with finalizers (e.g., PVCs with kubernetes.io/pvc-protection) will
+// get a deletion timestamp and be deleted when their finalizers are cleared.
 func (sc *RealSubResourceControl) deleteResource(ctx context.Context, xset api.XSetObject, resource client.Object, gvk schema.GroupVersionKind) error {
-	// Remove finalizers before deleting to ensure immediate removal from etcd.
-	// Without this, resources with finalizers (e.g., PVCs with kubernetes.io/pvc-protection)
-	// would only get DeletionTimestamp set but remain in etcd until the finalizer controller runs.
-	if len(resource.GetFinalizers()) > 0 {
-		patch := client.MergeFrom(resource.DeepCopyObject().(client.Object))
-		resource.SetFinalizers(nil)
-		if err := sc.client.Patch(ctx, resource, patch); err != nil && !apierrors.IsNotFound(err) {
-			return fmt.Errorf("failed to remove finalizers from %s %s: %w", gvk.Kind, resource.GetName(), err)
-		}
-	}
-
-	if err := sc.client.Delete(ctx, resource); err != nil {
-		return err
+	if err := sc.client.Delete(ctx, resource); err != nil && !apierrors.IsNotFound(err) {
+		return fmt.Errorf("failed to delete %s %s: %w", gvk.Kind, resource.GetName(), err)
 	}
 
 	// Track expectation for deletion
@@ -580,15 +568,8 @@ func (sc *RealSubResourceControl) createResourcesForAdapter(ctx context.Context,
 				}, existingResource); getErr != nil {
 					return fmt.Errorf("failed to get existing %s %s: %w", gvk.Kind, resource.GetName(), getErr)
 				}
-				// If the existing resource is being deleted, help it along by removing finalizers
+				// If the existing resource is being deleted, wait for it to be gone
 				if existingResource.GetDeletionTimestamp() != nil {
-					if len(existingResource.GetFinalizers()) > 0 {
-						patch := client.MergeFrom(existingResource.DeepCopyObject().(client.Object))
-						existingResource.SetFinalizers(nil)
-						if patchErr := sc.client.Patch(ctx, existingResource, patch); patchErr != nil && !apierrors.IsNotFound(patchErr) {
-							return fmt.Errorf("failed to remove finalizers from dying %s %s: %w", gvk.Kind, resource.GetName(), patchErr)
-						}
-					}
 					// Return error to requeue — the resource will be gone in the next reconcile
 					return fmt.Errorf("%s %s is being deleted, will retry on next reconcile", gvk.Kind, resource.GetName())
 				}
