@@ -634,7 +634,7 @@ func (sc *RealSubResourceControl) DeleteTargetUnusedResources(ctx context.Contex
 
 	// Process each adapter type
 	for _, adapter := range sc.adaptersByGVK {
-		if err := sc.deleteUnusedResourcesForAdapter(ctx, xset, target, existing, targetID, adapter); err != nil {
+		if err := sc.deleteUnusedResourcesForAdapter(ctx, xset, existing, targetID, adapter); err != nil {
 			return err
 		}
 	}
@@ -659,7 +659,7 @@ func (sc *RealSubResourceControl) DeleteTargetRecreateResources(ctx context.Cont
 }
 
 // deleteUnusedResourcesForAdapter handles unused resource deletion for a specific adapter.
-func (sc *RealSubResourceControl) deleteUnusedResourcesForAdapter(ctx context.Context, xset api.XSetObject, target client.Object, existing []SubResourceState, targetID string, adapter api.SubResourceAdapter) error {
+func (sc *RealSubResourceControl) deleteUnusedResourcesForAdapter(ctx context.Context, xset api.XSetObject, existing []SubResourceState, targetID string, adapter api.SubResourceAdapter) error {
 	gvk := adapter.Meta()
 
 	// Classify resources by hash for this adapter
@@ -737,7 +737,7 @@ func (r *RealSubResourceControl) IsTargetTemplateChanged(xset api.XSetObject, ta
 	}
 
 	for _, adapter := range r.adaptersByGVK {
-		changed, err := r.isAdapterTemplateChanged(xset, target, targetID, adapter, existing)
+		changed, err := r.isAdapterTemplateChanged(xset, targetID, adapter, existing)
 		if err != nil {
 			return false, err
 		}
@@ -759,7 +759,7 @@ func (r *RealSubResourceControl) IsTargetTemplateChanged(xset api.XSetObject, ta
 // Note: This does NOT check for missing resources (cache lag after creation can cause
 // false positives). Missing resource detection is handled by RecreateWhenXSetUpdated
 // and the update flow's DeleteTargetRecreateResources.
-func (r *RealSubResourceControl) isAdapterTemplateChanged(xset api.XSetObject, target client.Object, targetID string, adapter api.SubResourceAdapter, existing []SubResourceState) (bool, error) {
+func (r *RealSubResourceControl) isAdapterTemplateChanged(xset api.XSetObject, targetID string, adapter api.SubResourceAdapter, existing []SubResourceState) (bool, error) {
 	gvk := adapter.Meta()
 
 	// Get current templates

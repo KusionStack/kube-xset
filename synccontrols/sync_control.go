@@ -161,7 +161,8 @@ func (r *RealSyncControl) SyncTargets(ctx context.Context, instance api.XSetObje
 		if err != nil {
 			return false, fmt.Errorf("fail to adopt orphaned subresources: %w", err)
 		}
-		syncContext.ExistingSubResources = append(existing, adopted...)
+		existing = append(existing, adopted...)
+		syncContext.ExistingSubResources = existing
 	}
 
 	// sync include exclude targets
