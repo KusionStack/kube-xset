@@ -172,6 +172,15 @@ func (r *RealSyncControl) replaceOriginTargets(
 			return err
 		}
 
+		// apply post-create target funcs (e.g., set pod hostname based on pod name)
+		if postCreateAdapter, ok := r.xsetController.(api.XPostCreateTarget); ok {
+			for _, fn := range postCreateAdapter.GetXPostCreateTargetFuncs(replaceRevision) {
+				if err = fn(newTarget); err != nil {
+					return fmt.Errorf("fail to apply post-create target func for replace target %s: %w", newTarget.GetName(), err)
+				}
+			}
+		}
+
 		r.xsetLabelAnnoMgr.Set(newTarget, api.XReplacePairOriginName, originTarget.GetName())
 		r.xsetLabelAnnoMgr.Set(newTarget, api.XCreatingLabel, strconv.FormatInt(time.Now().UnixNano(), 10))
 		r.resourceContextControl.Put(newTargetContext, api.EnumRevisionContextDataKey, replaceRevision.GetName())

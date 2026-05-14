@@ -137,3 +137,12 @@ type DecorationAdapter interface {
 type TargetPrefixGetter interface {
 	GetTargetPrefix(xset XSetObject) string
 }
+
+// XPostCreateTarget is an optional interface that XSetController can implement
+// to apply additional modifications to targets after their names are assigned
+// (e.g., setting pod hostname based on the pod name).
+// The functions returned by GetXPostCreateTargetFuncs are called after the target
+// object is constructed but before it is created on the API server.
+type XPostCreateTarget interface {
+	GetXPostCreateTargetFuncs(revision *appsv1.ControllerRevision) []func(client.Object) error
+}

@@ -562,6 +562,14 @@ func (r *RealSyncControl) Scale(ctx context.Context, xsetObject api.XSetObject, 
 				if err != nil {
 					return apierrors.NewInvalid(schema.GroupKind{Group: r.targetGVK.Group, Kind: r.targetGVK.Kind}, target.GetGenerateName(), []*field.Error{{Detail: err.Error()}})
 				}
+				// apply post-create target funcs (e.g., set pod hostname based on pod name)
+				if postCreateAdapter, ok := r.xsetController.(api.XPostCreateTarget); ok {
+					for _, fn := range postCreateAdapter.GetXPostCreateTargetFuncs(revision) {
+						if err = fn(target); err != nil {
+							return fmt.Errorf("fail to apply post-create target func for target %s: %w", target.GetName(), err)
+						}
+					}
+				}
 				// create subresources for targets
 				if r.subResourceControl != nil {
 					if err = r.subResourceControl.CreateTargetResources(ctx, xsetObject, target, syncContext.ExistingSubResources); err != nil {
