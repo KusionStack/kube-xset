@@ -20,18 +20,20 @@ import (
 	"time"
 
 	appsv1 "k8s.io/api/apps/v1"
-	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/util/sets"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
 	"kusionstack.io/kube-xset/api"
+	"kusionstack.io/kube-xset/subresources"
 )
 
 type SyncContext struct {
-	Revisions           []*appsv1.ControllerRevision
-	CurrentRevision     *appsv1.ControllerRevision
-	UpdatedRevision     *appsv1.ControllerRevision
-	ExistingSubResource []client.Object
+	Revisions       []*appsv1.ControllerRevision
+	CurrentRevision *appsv1.ControllerRevision
+	UpdatedRevision *appsv1.ControllerRevision
+
+	// ExistingSubResources holds all subresources owned by the XSet, populated in SyncTargets.
+	ExistingSubResources []subresources.SubResourceState
 
 	FilteredTarget []client.Object
 	TargetWrappers []*TargetWrapper
@@ -41,13 +43,7 @@ type SyncContext struct {
 	CurrentIDs sets.Int
 	OwnedIds   map[int]*api.ContextDetail
 
-	SubResources
-
 	NewStatus *api.XSetStatus
-}
-
-type SubResources struct {
-	ExistingPvcs []*corev1.PersistentVolumeClaim
 }
 
 type TargetWrapper struct {
@@ -112,6 +108,6 @@ type TargetUpdateInfo struct {
 }
 
 type SubResourcesChanged struct {
-	// indicate if the pvc template changed
-	PvcTmpHashChanged bool
+	// indicate if any subresource template changed
+	SubResourceTemplateChanged bool
 }

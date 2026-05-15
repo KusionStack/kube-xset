@@ -42,7 +42,13 @@ func NewTargetFrom(setController api.XSetController, xsetLabelAnnoMgr api.XSetLa
 	ownerRef := metav1.NewControllerRef(owner, meta.GroupVersionKind())
 	targetObj.SetOwnerReferences(append(targetObj.GetOwnerReferences(), *ownerRef))
 	targetObj.SetNamespace(owner.GetNamespace())
-	targetObj.SetGenerateName(GetTargetsPrefix(owner.GetName()))
+
+	// Get prefix from controller (may be empty for default)
+	var prefixOverride string
+	if pg, ok := setController.(api.TargetPrefixGetter); ok {
+		prefixOverride = pg.GetTargetPrefix(owner)
+	}
+	targetObj.SetGenerateName(GetTargetsPrefix(prefixOverride, owner.GetName()))
 
 	if IsTargetNamingSuffixPolicyPersistentSequence(setController.GetXSetSpec(owner)) {
 		targetObj.SetName(fmt.Sprintf("%s%d", targetObj.GetGenerateName(), id))
@@ -99,7 +105,12 @@ func AddOrUpdateCondition(status *api.XSetStatus, conditionType api.XSetConditio
 	}
 }
 
-func GetTargetsPrefix(controllerName string) string {
+// GetTargetsPrefix returns the prefix for target names.
+// If override is non-empty, uses it; otherwise uses controllerName with DNS validation.
+func GetTargetsPrefix(override, controllerName string) string {
+	if override != "" {
+		return override
+	}
 	// use the dash (if the name isn't too long) to make the target name a bit prettier
 	prefix := fmt.Sprintf("%s-", controllerName)
 	if len(apimachineryvalidation.NameIsDNSSubdomain(prefix, true)) != 0 {

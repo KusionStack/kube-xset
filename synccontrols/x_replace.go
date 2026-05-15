@@ -36,7 +36,6 @@ import (
 
 	"kusionstack.io/kube-xset/api"
 	"kusionstack.io/kube-xset/opslifecycle"
-	"kusionstack.io/kube-xset/subresources"
 	"kusionstack.io/kube-xset/xcontrol"
 )
 
@@ -177,11 +176,10 @@ func (r *RealSyncControl) replaceOriginTargets(
 		r.xsetLabelAnnoMgr.Set(newTarget, api.XCreatingLabel, strconv.FormatInt(time.Now().UnixNano(), 10))
 		r.resourceContextControl.Put(newTargetContext, api.EnumRevisionContextDataKey, replaceRevision.GetName())
 
-		// create pvcs for new target
-		if _, enabled := subresources.GetSubresourcePvcAdapter(r.xsetController); enabled {
-			err = r.pvcControl.CreateTargetPvcs(ctx, instance, newTarget, syncContext.ExistingPvcs)
-			if err != nil {
-				return fmt.Errorf("fail to create PVCs for target %s: %w", newTarget.GetName(), err)
+		// create subresources for new target
+		if r.subResourceControl != nil {
+			if err = r.subResourceControl.CreateTargetResources(ctx, instance, newTarget, syncContext.ExistingSubResources); err != nil {
+				return fmt.Errorf("fail to create subresources for target %s: %w", newTarget.GetName(), err)
 			}
 		}
 

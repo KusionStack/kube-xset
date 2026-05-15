@@ -23,8 +23,6 @@ import (
 	"strconv"
 	"time"
 
-	corev1 "k8s.io/api/core/v1"
-	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/apimachinery/pkg/util/sets"
@@ -37,7 +35,6 @@ import (
 	"kusionstack.io/kube-xset/api"
 	"kusionstack.io/kube-xset/features"
 	"kusionstack.io/kube-xset/opslifecycle"
-	"kusionstack.io/kube-xset/subresources"
 	"kusionstack.io/kube-xset/xcontrol"
 )
 
@@ -168,27 +165,10 @@ func (r *RealSyncControl) excludeTarget(ctx context.Context, xsetObject api.XSet
 		return err
 	}
 
-	// exclude subresource
-	if adapter, enabled := subresources.GetSubresourcePvcAdapter(r.xsetController); enabled {
-		volumes := adapter.GetXSpecVolumes(target)
-		for i := range volumes {
-			volume := volumes[i]
-			if volume.PersistentVolumeClaim == nil {
-				continue
-			}
-			pvc := &corev1.PersistentVolumeClaim{}
-			err := r.Client.Get(ctx, types.NamespacedName{Namespace: target.GetNamespace(), Name: volume.PersistentVolumeClaim.ClaimName}, pvc)
-			// If pvc not found, ignore it. In case of pvc is filtered out by controller-mesh
-			if apierrors.IsNotFound(err) {
-				continue
-			} else if err != nil {
-				return err
-			}
-
-			r.xsetLabelAnnoMgr.Set(pvc, api.XOrphanedIndicationLabelKey, "true")
-			if err := r.pvcControl.OrphanPvc(ctx, xsetObject, pvc); err != nil {
-				return err
-			}
+	// exclude subresources
+	if r.subResourceControl != nil {
+		if err := r.subResourceControl.OrphanTargetResources(ctx, xsetObject, target); err != nil {
+			return err
 		}
 	}
 
@@ -206,28 +186,10 @@ func (r *RealSyncControl) includeTarget(ctx context.Context, xsetObject api.XSet
 		return err
 	}
 
-	// exclude subresource
-	if adapter, enabled := subresources.GetSubresourcePvcAdapter(r.xsetController); enabled {
-		volumes := adapter.GetXSpecVolumes(target)
-		for i := range volumes {
-			volume := volumes[i]
-			if volume.PersistentVolumeClaim == nil {
-				continue
-			}
-			pvc := &corev1.PersistentVolumeClaim{}
-			err := r.Client.Get(ctx, types.NamespacedName{Namespace: target.GetNamespace(), Name: volume.PersistentVolumeClaim.ClaimName}, pvc)
-			// If pvc not found, ignore it. In case of pvc is filtered out by controller-mesh
-			if apierrors.IsNotFound(err) {
-				continue
-			} else if err != nil {
-				return err
-			}
-
-			r.xsetLabelAnnoMgr.Set(pvc, api.XInstanceIdLabelKey, instanceId)
-			r.xsetLabelAnnoMgr.Delete(pvc, api.XOrphanedIndicationLabelKey)
-			if err := r.pvcControl.AdoptPvc(ctx, xsetObject, pvc); err != nil {
-				return err
-			}
+	// include subresources
+	if r.subResourceControl != nil {
+		if err := r.subResourceControl.AdoptTargetResources(ctx, xsetObject, target, instanceId); err != nil {
+			return err
 		}
 	}
 
