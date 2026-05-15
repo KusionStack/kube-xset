@@ -53,9 +53,6 @@ func NewTargetFrom(setController api.XSetController, xsetLabelAnnoMgr api.XSetLa
 	controlByXSet(xsetLabelAnnoMgr, targetObj)
 
 	for _, fn := range updateFuncs {
-		if fn == nil {
-			continue
-		}
 		if err := fn(targetObj); err != nil {
 			return targetObj, err
 		}
@@ -186,7 +183,9 @@ func IsTargetNamingSuffixPolicyPersistentSequence(xsetSpec *api.XSetSpec) bool {
 
 func getPostCreateFunc(xsetController api.XSetController, xsetObject api.XSetObject) func(client.Object) error {
 	if adapter, ok := xsetController.(api.PostCreateAdapter); ok {
-		return adapter.GetPostCreateFunc(xsetObject)
+		if fn := adapter.GetPostCreateFunc(xsetObject); fn != nil {
+			return fn
+		}
 	}
-	return nil
+	return func(_ client.Object) error { return nil }
 }
