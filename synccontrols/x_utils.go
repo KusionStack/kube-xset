@@ -53,6 +53,9 @@ func NewTargetFrom(setController api.XSetController, xsetLabelAnnoMgr api.XSetLa
 	controlByXSet(xsetLabelAnnoMgr, targetObj)
 
 	for _, fn := range updateFuncs {
+		if fn == nil {
+			continue
+		}
 		if err := fn(targetObj); err != nil {
 			return targetObj, err
 		}
