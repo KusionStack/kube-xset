@@ -168,6 +168,7 @@ func (r *RealSyncControl) replaceOriginTargets(
 				}
 				return nil
 			},
+			getPostCreateFunc(r.xsetController, instance),
 		)
 		if err != nil {
 			return err

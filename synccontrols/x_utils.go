@@ -180,3 +180,10 @@ func IsTargetNamingSuffixPolicyPersistentSequence(xsetSpec *api.XSetSpec) bool {
 	}
 	return xsetSpec.NamingStrategy.TargetNamingSuffixPolicy == api.TargetNamingSuffixPolicyPersistentSequence
 }
+
+func getPostCreateFunc(xsetController api.XSetController, xsetObject api.XSetObject) func(client.Object) error {
+	if adapter, ok := xsetController.(api.PostCreateAdapter); ok {
+		return adapter.GetPostCreateFunc(xsetObject)
+	}
+	return nil
+}

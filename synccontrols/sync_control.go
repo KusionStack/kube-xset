@@ -571,6 +571,7 @@ func (r *RealSyncControl) Scale(ctx context.Context, xsetObject api.XSetObject, 
 						return nil
 					},
 					r.xsetController.GetXSetTemplatePatcher(xsetObject),
+					getPostCreateFunc(r.xsetController, xsetObject),
 				)
 				if err != nil {
 					return apierrors.NewInvalid(schema.GroupKind{Group: r.targetGVK.Group, Kind: r.targetGVK.Kind}, target.GetGenerateName(), []*field.Error{{Detail: err.Error()}})

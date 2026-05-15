@@ -104,6 +104,14 @@ type SubResourcePvcAdapter interface {
 	SetXSpecVolumes(object client.Object, pvcs []corev1.Volume)
 }
 
+// PostCreateAdapter is used to apply post-creation modifications on a target object.
+// Unlike GetXSetTemplatePatcher which is also applied during update comparisons,
+// GetPostCreateFunc is only called when a target is actually being created (scale out or replace),
+// not when building objects for version comparison during in-place updates.
+type PostCreateAdapter interface {
+	GetPostCreateFunc(object XSetObject) func(client.Object) error
+}
+
 // DecorationAdapter is used to manage decoration for XSet. Decoration should be a workload to manage patcher on X target.
 // Once adapter is implemented, XSetController will (1) watch for decoration change, (2) patch effective decorations on
 // X target when creating, (3) manage decoration update when decoration changed.
