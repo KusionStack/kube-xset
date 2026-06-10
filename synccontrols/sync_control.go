@@ -139,6 +139,8 @@ func (r *RealSyncControl) SyncTargets(ctx context.Context, instance api.XSetObje
 		return false, fmt.Errorf("fail to get filtered Targets: %w", err)
 	}
 
+	syncContext.AllTarget = allTargets
+
 	if IsTargetNamingSuffixPolicyPersistentSequence(xspec) {
 		// for naming with persistent sequences suffix, targets with same name should not exist at same time
 		syncContext.FilteredTarget = allTargets
@@ -907,12 +909,18 @@ func (r *RealSyncControl) CalculateStatus(_ context.Context, instance api.XSetOb
 	newStatus := syncContext.NewStatus
 	newStatus.ObservedGeneration = instance.GetGeneration()
 
-	var readyReplicas, scheduledReplicas, replicas, terminatingReplicas, updatedReplicas, operatingReplicas, updatedReadyReplicas, availableReplicas, updatedAvailableReplicas int32
+	var terminatingReplicas int32
+	for _, target := range syncContext.AllTarget {
+		if target.GetDeletionTimestamp() != nil {
+			terminatingReplicas++
+		}
+	}
+
+	var readyReplicas, scheduledReplicas, replicas, updatedReplicas, operatingReplicas, updatedReadyReplicas, availableReplicas, updatedAvailableReplicas int32
 
 	for _, target := range syncContext.FilteredTarget {
 		// for naming with persistent sequences suffix, terminating targets can be shown in status
 		if target.GetDeletionTimestamp() != nil {
-			terminatingReplicas++
 			if !IsTargetNamingSuffixPolicyPersistentSequence(r.xsetController.GetXSetSpec(instance)) {
 				continue
 			}

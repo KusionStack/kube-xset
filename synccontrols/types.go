@@ -34,6 +34,7 @@ type SyncContext struct {
 	ExistingSubResource []client.Object
 
 	FilteredTarget []client.Object
+	AllTarget      []client.Object
 	TargetWrappers []*TargetWrapper
 	activeTargets  []*TargetWrapper
 	replacingMap   map[string]*TargetWrapper
