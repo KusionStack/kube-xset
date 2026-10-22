@@ -65,6 +65,13 @@ func (r *revisionOwner) GetInUsedRevisions(parent metav1.Object) (sets.String, e
 
 	res.Insert(status.UpdatedRevision)
 	res.Insert(status.CurrentRevision)
+	if operation, supported := r.XSetController.(api.MultiPatchXSetOperation); supported {
+		multiPatchRevisions := multiPatchInUseRevisions(
+			operation.GetRevisionPlan(xSetObject),
+			operation.GetMultiPatchStatus(xSetObject),
+		)
+		res.Insert(multiPatchRevisions.List()...)
+	}
 
 	targets, _, err := r.TargetControl.GetFilteredTargets(context.TODO(), spec.Selector, xSetObject)
 	if err != nil {
@@ -79,6 +86,24 @@ func (r *revisionOwner) GetInUsedRevisions(parent metav1.Object) (sets.String, e
 		}
 	}
 	return res, nil
+}
+
+// multiPatchInUseRevisions protects the immutable base needed to compose every
+// patch vector. Head is protected as well because it may be a historical
+// revision reused by the catalog rather than the revision manager's latest
+// updated revision.
+func multiPatchInUseRevisions(plan *api.RevisionPlan, status *api.MultiPatchRevisionStatus) sets.String {
+	result := sets.NewString()
+	if plan == nil || plan.Mode != api.RevisionModeConcurrentPatches || status == nil {
+		return result
+	}
+	if status.BaseRevision != "" {
+		result.Insert(status.BaseRevision)
+	}
+	if status.HeadRevision != "" {
+		result.Insert(status.HeadRevision)
+	}
+	return result
 }
 
 func (r *revisionOwner) GetCollisionCount(obj metav1.Object) *int32 {

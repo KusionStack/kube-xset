@@ -43,6 +43,7 @@ import (
 
 	"kusionstack.io/kube-xset/api"
 	"kusionstack.io/kube-xset/api/validation"
+	xsetpatches "kusionstack.io/kube-xset/patches"
 	"kusionstack.io/kube-xset/resourcecontexts"
 	"kusionstack.io/kube-xset/revisionowner"
 	"kusionstack.io/kube-xset/subresources"
@@ -183,6 +184,11 @@ func (r *xSetCommonReconciler) Reconcile(ctx context.Context, req reconcile.Requ
 		logger.Info("not satisfied to reconcile")
 		return ctrl.Result{RequeueAfter: 30 * time.Second}, nil
 	}
+	if compacted, err := r.compactMultiPatchPlan(ctx, instance); err != nil {
+		return ctrl.Result{}, fmt.Errorf("compact completed patch journal for %s %s: %w", kind, key, err)
+	} else if compacted {
+		return ctrl.Result{Requeue: true}, nil
+	}
 
 	currentRevision, updatedRevision, revisions, collisionCount, _, err := r.revisionManager.ConstructRevisions(ctx, instance)
 	if err != nil {
@@ -207,11 +213,39 @@ func (r *xSetCommonReconciler) Reconcile(ctx context.Context, req reconcile.Requ
 	}
 
 	newStatus = r.syncControl.CalculateStatus(ctx, instance, syncContext)
+	if operation, supported := r.XSetController.(api.MultiPatchXSetOperation); supported && syncContext.MultiPatch != nil {
+		operation.SetMultiPatchStatus(instance, syncContext.MultiPatch.Status)
+	}
 	// update status anyway
 	if err := r.updateStatus(ctx, instance, newStatus); err != nil {
 		return requeueResult(requeueAfter), fmt.Errorf("fail to update status of %s %s: %w", kind, req, err)
 	}
 	return requeueResult(requeueAfter), syncErr
+}
+
+func (r *xSetCommonReconciler) compactMultiPatchPlan(ctx context.Context, instance api.XSetObject) (bool, error) {
+	operation, supported := r.XSetController.(api.MultiPatchXSetOperation)
+	if !supported {
+		return false, nil
+	}
+	plan := operation.GetRevisionPlan(instance)
+	if plan == nil || plan.Mode != api.RevisionModeConcurrentPatches || len(plan.ActivePatches) == 0 {
+		return false, nil
+	}
+	status := operation.GetMultiPatchStatus(instance)
+	replicas := int32(0)
+	if spec := r.XSetController.GetXSetSpec(instance); spec != nil && spec.Replicas != nil {
+		replicas = *spec.Replicas
+	}
+	compacted, removed := xsetpatches.CompactCompletedRevisionPlan(plan, status, replicas)
+	if len(removed) == 0 {
+		return false, nil
+	}
+	operation.SetRevisionPlan(instance, compacted)
+	if err := r.Client.Update(ctx, instance); err != nil {
+		return false, err
+	}
+	return true, nil
 }
 
 func (r *xSetCommonReconciler) doSync(ctx context.Context, instance api.XSetObject, syncContext *synccontrols.SyncContext) (*time.Duration, error) {

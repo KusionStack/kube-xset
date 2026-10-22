@@ -60,6 +60,18 @@ type XSetOperation interface {
 	GetXSetTemplatePatcher(object metav1.Object) func(client.Object) error
 }
 
+// MultiPatchXSetOperation is an optional workload adapter. XSet uses it only
+// when the workload has explicitly enabled ConcurrentPatches; workloads that do
+// not implement it continue through the legacy single-revision path.
+type MultiPatchXSetOperation interface {
+	GetRevisionPlan(object XSetObject) *RevisionPlan
+	SetRevisionPlan(object XSetObject, plan *RevisionPlan)
+	GetMultiPatchStatus(object XSetObject) *MultiPatchRevisionStatus
+	SetMultiPatchStatus(object XSetObject, status *MultiPatchRevisionStatus)
+	BuildMultiPatchRevision(base *appsv1.ControllerRevision, patchSet []PatchRevision, name string) (*appsv1.ControllerRevision, error)
+	MultiPatchCommandLabelPrefix() string
+}
+
 type XOperation interface {
 	GetXObjectFromRevision(revision *appsv1.ControllerRevision) (client.Object, error)
 	CheckScheduled(object client.Object) bool
