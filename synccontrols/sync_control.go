@@ -310,6 +310,9 @@ func (r *RealSyncControl) SyncTargets(ctx context.Context, instance api.XSetObje
 
 	syncContext.TargetWrappers = targetWrappers
 	syncContext.OwnedIds = ownedIDs
+	if err := r.prepareMultiPatch(ctx, instance, syncContext); err != nil {
+		return false, fmt.Errorf("prepare concurrent patch execution: %w", err)
+	}
 
 	return inExSucceed, nil
 }
@@ -527,11 +530,6 @@ func (r *RealSyncControl) Scale(ctx context.Context, xsetObject api.XSetObject, 
 			needUpdateContext := atomic.Bool{}
 			succCount, err := controllerutils.SlowStartBatch(len(availableContexts), controllerutils.SlowStartInitialBatchSize, false, func(i int, _ error) (err error) {
 				availableIDContext := availableContexts[i]
-				defer func() {
-					if r.resourceContextControl.DecideContextRevisionAfterCreate(availableIDContext, syncContext.UpdatedRevision, err) {
-						needUpdateContext.Store(true)
-					}
-				}()
 				// use revision recorded in Context
 				revision := syncContext.UpdatedRevision
 				if revisionName, exist := r.resourceContextControl.Get(availableIDContext, api.EnumRevisionContextDataKey); exist && revisionName != "" {
@@ -542,6 +540,11 @@ func (r *RealSyncControl) Scale(ctx context.Context, xsetObject api.XSetObject, 
 						}
 					}
 				}
+				defer func() {
+					if r.resourceContextControl.DecideContextRevisionAfterCreate(availableIDContext, revision, err) {
+						needUpdateContext.Store(true)
+					}
+				}()
 				// scale out new Targets with updatedRevision
 				// TODO use cache
 				target, err := NewTargetFrom(r.xsetController, r.xsetLabelAnnoMgr, xsetObject, revision, availableIDContext.ID,
@@ -765,6 +768,17 @@ func (r *RealSyncControl) Update(ctx context.Context, xsetObject api.XSetObject,
 	if err != nil {
 		return false, recordedRequeueAfter, err
 	}
+	commandsConsumed := false
+	for _, targetInfo := range targetUpdateInfos {
+		if targetInfo.PlaceHolder || !targetInfo.IsUpdatedRevision || targetInfo.IsDuringUpdateOps {
+			continue
+		}
+		consumed, consumeErr := r.clearConsumedMultiPatchCommands(ctx, targetInfo)
+		if consumeErr != nil {
+			return commandsConsumed, recordedRequeueAfter, consumeErr
+		}
+		commandsConsumed = commandsConsumed || consumed
+	}
 
 	// 2. decide Target update candidates
 	candidates := r.decideTargetToUpdate(r.xsetController, xsetObject, targetUpdateInfos)
@@ -782,7 +796,7 @@ func (r *RealSyncControl) Update(ctx context.Context, xsetObject api.XSetObject,
 
 		// 3.1 fulfillTargetUpdateInfo to all not updatedRevision target
 		if targetInfo.CurrentRevision.GetName() != UnknownRevision {
-			if err = updater.FulfillTargetUpdatedInfo(ctx, syncContext.UpdatedRevision, targetInfo); err != nil {
+			if err = updater.FulfillTargetUpdatedInfo(ctx, targetInfo.UpdateRevision, targetInfo); err != nil {
 				logger.Error(err, fmt.Sprintf("fail to analyze target %s/%s in-place update support", targetInfo.GetNamespace(), targetInfo.GetName()))
 				continue
 			}
@@ -823,7 +837,7 @@ func (r *RealSyncControl) Update(ctx context.Context, xsetObject api.XSetObject,
 		logger.Info("before target update operation",
 			"target", ObjectKeyString(targetInfo.Object),
 			"revision.from", targetInfo.CurrentRevision.GetName(),
-			"revision.to", syncContext.UpdatedRevision.GetName(),
+			"revision.to", targetInfo.UpdateRevision.GetName(),
 			"inPlaceUpdate", targetInfo.InPlaceUpdateSupport,
 			"onlyMetadataChanged", targetInfo.OnlyMetadataChanged,
 		)
@@ -902,7 +916,7 @@ func (r *RealSyncControl) Update(ctx context.Context, xsetObject api.XSetObject,
 		return nil
 	})
 
-	return updating || succCount > 0, recordedRequeueAfter, err
+	return updating || succCount > 0 || commandsConsumed, recordedRequeueAfter, err
 }
 
 func (r *RealSyncControl) CalculateStatus(_ context.Context, instance api.XSetObject, syncContext *SyncContext) *api.XSetStatus {
@@ -972,6 +986,7 @@ func (r *RealSyncControl) CalculateStatus(_ context.Context, instance api.XSetOb
 		newStatus.UpdatedReadyReplicas >= *spec.Replicas {
 		newStatus.CurrentRevision = syncContext.UpdatedRevision.Name
 	}
+	r.calculateMultiPatchStatus(syncContext)
 
 	return newStatus
 }

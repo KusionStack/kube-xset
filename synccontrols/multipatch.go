@@ -1,0 +1,367 @@
+/*
+ * Copyright 2024-2026 KusionStack Authors.
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ *     http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+
+package synccontrols
+
+import (
+	"context"
+	"encoding/json"
+	"fmt"
+	"sort"
+	"strings"
+
+	appsv1 "k8s.io/api/apps/v1"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/types"
+	"kusionstack.io/kube-xset/api"
+	xsetpatches "kusionstack.io/kube-xset/patches"
+	"sigs.k8s.io/controller-runtime/pkg/client"
+)
+
+type multiPatchIdentity struct {
+	ID           int
+	RevisionName string
+	Labels       map[string]string
+	New          bool
+}
+
+// MultiPatchSyncContext is the per-reconcile execution model. It translates
+// patch vectors into full revisions so the existing update implementations can
+// remain unaware of patch composition.
+type MultiPatchSyncContext struct {
+	Plan             *api.RevisionPlan
+	Status           *api.MultiPatchRevisionStatus
+	Catalog          *xsetpatches.RevisionCatalog
+	InstancePlans    map[int]xsetpatches.InstancePlan
+	CurrentPatchIDs  map[int][]string
+	DesiredRevisions map[int]*appsv1.ControllerRevision
+}
+
+func (r *RealSyncControl) prepareMultiPatch(ctx context.Context, xsetObject api.XSetObject, syncContext *SyncContext) error {
+	operation, supported := r.xsetController.(api.MultiPatchXSetOperation)
+	if !supported {
+		return nil
+	}
+	plan := operation.GetRevisionPlan(xsetObject)
+	if plan == nil || plan.Mode == "" {
+		return nil
+	}
+	if plan.Mode != api.RevisionModeConcurrentPatches {
+		return fmt.Errorf("unsupported revision mode %q", plan.Mode)
+	}
+
+	wrappersByID := make(map[int]*TargetWrapper, len(syncContext.TargetWrappers))
+	for _, wrapper := range syncContext.TargetWrappers {
+		wrappersByID[wrapper.ID] = wrapper
+	}
+	identities := make([]multiPatchIdentity, 0, len(syncContext.OwnedIds))
+	for id, detail := range syncContext.OwnedIds {
+		identity := multiPatchIdentity{ID: id}
+		if _, justCreated := r.resourceContextControl.Get(detail, api.EnumJustCreateContextDataKey); justCreated {
+			identity.New = true
+		}
+		if wrapper := wrappersByID[id]; wrapper != nil {
+			identity.Labels = wrapper.GetLabels()
+			if labels := wrapper.GetLabels(); labels != nil {
+				identity.RevisionName = labels[appsv1.ControllerRevisionHashLabelKey]
+			}
+		}
+		if identity.RevisionName == "" {
+			identity.RevisionName, _ = r.resourceContextControl.Get(detail, api.EnumRevisionContextDataKey)
+		}
+		identities = append(identities, identity)
+	}
+
+	state, err := buildMultiPatchExecutionState(
+		plan,
+		operation.GetMultiPatchStatus(xsetObject),
+		syncContext.CurrentRevision,
+		syncContext.UpdatedRevision,
+		syncContext.Revisions,
+		identities,
+		operation.BuildMultiPatchRevision,
+		operation.MultiPatchCommandLabelPrefix(),
+		r.xsetLabelAnnoMgr.Value(api.XSetUpdateIndicationLabelKey),
+	)
+	if err != nil {
+		return err
+	}
+
+	knownRevisions := make(map[string]struct{}, len(syncContext.Revisions))
+	for _, revision := range syncContext.Revisions {
+		knownRevisions[revision.Name] = struct{}{}
+	}
+	for _, revision := range state.Catalog.SyntheticRevisions() {
+		if _, exists := knownRevisions[revision.Name]; exists {
+			continue
+		}
+		syncContext.Revisions = append(syncContext.Revisions, revision)
+		knownRevisions[revision.Name] = struct{}{}
+	}
+
+	contextChanged := false
+	for id, desiredRevision := range state.DesiredRevisions {
+		if wrappersByID[id] != nil {
+			continue
+		}
+		detail := syncContext.OwnedIds[id]
+		if !r.resourceContextControl.Contains(detail, api.EnumRevisionContextDataKey, desiredRevision.Name) {
+			r.resourceContextControl.Put(detail, api.EnumRevisionContextDataKey, desiredRevision.Name)
+			contextChanged = true
+		}
+	}
+	if contextChanged {
+		if err := r.resourceContextControl.UpdateToTargetContext(ctx, xsetObject, syncContext.OwnedIds); err != nil {
+			return fmt.Errorf("persist new identity patch vectors: %w", err)
+		}
+	}
+
+	syncContext.MultiPatch = state
+	return nil
+}
+
+func buildMultiPatchExecutionState(
+	plan *api.RevisionPlan,
+	status *api.MultiPatchRevisionStatus,
+	_, updatedRevision *appsv1.ControllerRevision,
+	history []*appsv1.ControllerRevision,
+	identities []multiPatchIdentity,
+	builder xsetpatches.RevisionBuilder,
+	commandLabelPrefix, legacyCommandLabel string,
+) (*MultiPatchSyncContext, error) {
+	if plan == nil || plan.Mode != api.RevisionModeConcurrentPatches {
+		return nil, fmt.Errorf("ConcurrentPatches revision plan is required")
+	}
+	if updatedRevision == nil {
+		return nil, fmt.Errorf("updated revision must not be nil")
+	}
+
+	resultStatus := copyMultiPatchStatus(status)
+	base, err := reconstructMultiPatchBase(updatedRevision, plan, builder)
+	if err != nil {
+		return nil, err
+	}
+
+	catalog, err := xsetpatches.BuildRevisionCatalog(base, history, plan, builder)
+	if err != nil {
+		return nil, err
+	}
+	resolvedBase, found := catalog.RevisionFor(nil)
+	if !found {
+		return nil, fmt.Errorf("base revision not found")
+	}
+	resultStatus.BaseRevision = resolvedBase.Name
+	instanceStates := make([]xsetpatches.InstanceState, 0, len(identities))
+	currentByID := make(map[int][]string, len(identities))
+	for _, identity := range identities {
+		var currentPatchIDs []string
+		if identity.RevisionName != "" {
+			var found bool
+			currentPatchIDs, found = catalog.PatchIDsForRevision(identity.RevisionName)
+			if !found {
+				return nil, fmt.Errorf("identity %d references unknown revision %q", identity.ID, identity.RevisionName)
+			}
+		} else if !identity.New {
+			return nil, fmt.Errorf("identity %d has no current revision", identity.ID)
+		}
+		currentByID[identity.ID] = append([]string(nil), currentPatchIDs...)
+		instanceStates = append(instanceStates, xsetpatches.InstanceState{
+			ID: identity.ID, AppliedPatchIDs: currentPatchIDs, Labels: identity.Labels, New: identity.New,
+		})
+	}
+
+	planned, err := xsetpatches.PlanInstances(plan, instanceStates, xsetpatches.PlanOptions{
+		CommandLabelPrefix: commandLabelPrefix,
+		LegacyCommandLabel: legacyCommandLabel,
+		BaseRevision:       base.Name,
+	})
+	if err != nil {
+		return nil, err
+	}
+	instancePlans := make(map[int]xsetpatches.InstancePlan, len(planned))
+	desiredRevisions := make(map[int]*appsv1.ControllerRevision, len(planned))
+	for i := range planned {
+		item := planned[i]
+		revision, found := catalog.RevisionFor(item.DesiredPatchIDs)
+		if !found {
+			return nil, fmt.Errorf("desired revision for identity %d patches %v not found", item.ID, item.DesiredPatchIDs)
+		}
+		instancePlans[item.ID] = item
+		desiredRevisions[item.ID] = revision
+	}
+	head, found := catalog.RevisionFor(xsetpatches.DesiredPatchIDs(plan))
+	if !found {
+		return nil, fmt.Errorf("head revision not found")
+	}
+	resultStatus.HeadRevision = head.Name
+
+	return &MultiPatchSyncContext{
+		Plan:             plan,
+		Status:           resultStatus,
+		Catalog:          catalog,
+		InstancePlans:    instancePlans,
+		CurrentPatchIDs:  currentByID,
+		DesiredRevisions: desiredRevisions,
+	}, nil
+}
+
+// reconstructMultiPatchBase derives Base from the authoritative Head template
+// on every reconcile. That makes reconciliation resilient even if an old
+// ControllerRevision has already been garbage-collected: reversing the active
+// desired patches is sufficient because their FieldSets are non-overlapping.
+func reconstructMultiPatchBase(head *appsv1.ControllerRevision, plan *api.RevisionPlan, builder xsetpatches.RevisionBuilder) (*appsv1.ControllerRevision, error) {
+	ids := xsetpatches.DesiredPatchIDs(plan)
+	byID := make(map[string]api.PatchRevision, len(plan.ActivePatches))
+	for i := range plan.ActivePatches {
+		byID[plan.ActivePatches[i].ID] = plan.ActivePatches[i]
+	}
+	reverseSet := make([]api.PatchRevision, 0, len(ids))
+	for _, id := range ids {
+		patch := byID[id]
+		patch.Patch, patch.ReversePatch = patch.ReversePatch, patch.Patch
+		reverseSet = append(reverseSet, patch)
+	}
+	base, err := builder(head, reverseSet, xsetpatches.StateKey(head.Name, append([]string{"base"}, ids...)))
+	if err != nil {
+		return nil, fmt.Errorf("reconstruct base revision from head: %w", err)
+	}
+	if base == nil {
+		return nil, fmt.Errorf("revision builder returned nil while reconstructing base")
+	}
+	return base, nil
+}
+
+func copyMultiPatchStatus(in *api.MultiPatchRevisionStatus) *api.MultiPatchRevisionStatus {
+	if in == nil {
+		return &api.MultiPatchRevisionStatus{}
+	}
+	out := &api.MultiPatchRevisionStatus{BaseRevision: in.BaseRevision, HeadRevision: in.HeadRevision}
+	if in.PatchStatuses != nil {
+		out.PatchStatuses = make([]api.PatchRevisionStatus, len(in.PatchStatuses))
+		copy(out.PatchStatuses, in.PatchStatuses)
+		for i := range out.PatchStatuses {
+			out.PatchStatuses[i].Conditions = append([]metav1.Condition(nil), in.PatchStatuses[i].Conditions...)
+		}
+	}
+	return out
+}
+
+func (r *RealSyncControl) calculateMultiPatchStatus(syncContext *SyncContext) {
+	state := syncContext.MultiPatch
+	if state == nil {
+		return
+	}
+	statuses := make(map[string]*api.PatchRevisionStatus, len(state.Plan.ActivePatches))
+	for i := range state.Plan.ActivePatches {
+		patch := &state.Plan.ActivePatches[i]
+		status := &api.PatchRevisionStatus{ID: patch.ID}
+		if patch.Rollout.Type == api.PatchRolloutStrategyTypeByLabel {
+			status.CommandLabelKey = r.xsetController.(api.MultiPatchXSetOperation).MultiPatchCommandLabelPrefix() + patch.ID
+		}
+		statuses[patch.ID] = status
+	}
+	for _, wrapper := range syncContext.TargetWrappers {
+		if wrapper.PlaceHolder {
+			continue
+		}
+		current := state.CurrentPatchIDs[wrapper.ID]
+		planned, exists := state.InstancePlans[wrapper.ID]
+		if !exists {
+			continue
+		}
+		for patchID, status := range statuses {
+			if containsPatchID(planned.DesiredPatchIDs, patchID) {
+				status.SelectedReplicas++
+			}
+			if containsPatchID(current, patchID) {
+				status.UpdatedReplicas++
+				if ready, _ := r.xsetController.CheckReadyTime(wrapper.Object); ready {
+					status.ReadyReplicas++
+				}
+				if r.xsetController.CheckAvailable(wrapper.Object) {
+					status.AvailableReplicas++
+				}
+			}
+		}
+		for key, command := range planned.CommandSnapshot {
+			for _, status := range statuses {
+				if key != status.CommandLabelKey {
+					continue
+				}
+				switch command {
+				case xsetpatches.CommandApply:
+					status.PendingApplyCommands++
+				case xsetpatches.CommandRemove:
+					status.PendingRemoveCommands++
+				}
+			}
+		}
+	}
+	ids := make([]string, 0, len(statuses))
+	for id := range statuses {
+		ids = append(ids, id)
+	}
+	sort.Strings(ids)
+	state.Status.PatchStatuses = make([]api.PatchRevisionStatus, 0, len(ids))
+	for _, id := range ids {
+		state.Status.PatchStatuses = append(state.Status.PatchStatuses, *statuses[id])
+	}
+}
+
+func containsPatchID(ids []string, want string) bool {
+	for _, id := range ids {
+		if id == want {
+			return true
+		}
+	}
+	return false
+}
+
+func buildCommandCleanupPatch(snapshot map[string]string) ([]byte, error) {
+	keys := make([]string, 0, len(snapshot))
+	for key := range snapshot {
+		keys = append(keys, key)
+	}
+	sort.Strings(keys)
+	operations := make([]map[string]interface{}, 0, len(keys)*2)
+	for _, key := range keys {
+		path := "/metadata/labels/" + escapeJSONPointerToken(key)
+		operations = append(operations,
+			map[string]interface{}{"op": "test", "path": path, "value": snapshot[key]},
+			map[string]interface{}{"op": "remove", "path": path},
+		)
+	}
+	return json.Marshal(operations)
+}
+
+func escapeJSONPointerToken(value string) string {
+	value = strings.ReplaceAll(value, "~", "~0")
+	return strings.ReplaceAll(value, "/", "~1")
+}
+
+func (r *RealSyncControl) clearConsumedMultiPatchCommands(ctx context.Context, targetInfo *TargetUpdateInfo) (bool, error) {
+	if len(targetInfo.CommandSnapshot) == 0 {
+		return false, nil
+	}
+	patch, err := buildCommandCleanupPatch(targetInfo.CommandSnapshot)
+	if err != nil {
+		return false, err
+	}
+	if err := r.xControl.PatchTarget(ctx, targetInfo.Object, client.RawPatch(types.JSONPatchType, patch)); err != nil {
+		return false, fmt.Errorf("clear consumed multi-patch commands from %s/%s: %w", targetInfo.GetNamespace(), targetInfo.GetName(), err)
+	}
+	return true, nil
+}
