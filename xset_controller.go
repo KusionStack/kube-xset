@@ -20,6 +20,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/go-logr/logr"
@@ -43,6 +44,7 @@ import (
 
 	"kusionstack.io/kube-xset/api"
 	"kusionstack.io/kube-xset/api/validation"
+	xsetmetrics "kusionstack.io/kube-xset/metrics"
 	xsetpatches "kusionstack.io/kube-xset/patches"
 	"kusionstack.io/kube-xset/resourcecontexts"
 	"kusionstack.io/kube-xset/revisionowner"
@@ -172,6 +174,7 @@ func (r *xSetCommonReconciler) Reconcile(ctx context.Context, req reconcile.Requ
 
 		logger.Info("object deleted")
 		r.cacheExpectations.DeleteExpectations(req.String())
+		xsetmetrics.ForgetMultiPatch(kind, req.Namespace, req.Name)
 		return ctrl.Result{}, nil
 	}
 
@@ -207,14 +210,25 @@ func (r *xSetCommonReconciler) Reconcile(ctx context.Context, req reconcile.Requ
 		NewStatus:       newStatus,
 	}
 
+	var previousMultiPatchStatus *api.MultiPatchRevisionStatus
+	if operation, supported := r.XSetController.(api.MultiPatchXSetOperation); supported {
+		previousMultiPatchStatus = copyMultiPatchRevisionStatus(operation.GetMultiPatchStatus(instance))
+	}
 	requeueAfter, syncErr := r.doSync(ctx, instance, syncContext)
 	if syncErr != nil {
 		logger.Error(syncErr, "failed to sync")
 	}
+	if syncContext.MultiPatch != nil {
+		syncContext.MultiPatch.SyncError = syncErr
+	}
 
 	newStatus = r.syncControl.CalculateStatus(ctx, instance, syncContext)
-	if operation, supported := r.XSetController.(api.MultiPatchXSetOperation); supported && syncContext.MultiPatch != nil {
-		operation.SetMultiPatchStatus(instance, syncContext.MultiPatch.Status)
+	if operation, supported := r.XSetController.(api.MultiPatchXSetOperation); supported {
+		if syncContext.MultiPatch != nil {
+			operation.SetMultiPatchStatus(instance, syncContext.MultiPatch.Status)
+			r.emitMultiPatchConditionEvents(instance, previousMultiPatchStatus, syncContext.MultiPatch.Status)
+		}
+		xsetmetrics.ObserveMultiPatch(kind, instance.GetNamespace(), instance.GetName(), operation.GetRevisionPlan(instance), operation.GetMultiPatchStatus(instance))
 	}
 	// update status anyway
 	if err := r.updateStatus(ctx, instance, newStatus); err != nil {
@@ -245,7 +259,52 @@ func (r *xSetCommonReconciler) compactMultiPatchPlan(ctx context.Context, instan
 	if err := r.Client.Update(ctx, instance); err != nil {
 		return false, err
 	}
+	xsetmetrics.RecordMultiPatchCompaction(r.meta.Kind, len(removed))
+	xsetmetrics.ObserveMultiPatch(r.meta.Kind, instance.GetNamespace(), instance.GetName(), compacted, status)
+	r.Recorder.Eventf(instance, corev1.EventTypeNormal, "PatchJournalCompacted", "compacted completed patches: %s", strings.Join(removed, ","))
 	return true, nil
+}
+
+func copyMultiPatchRevisionStatus(in *api.MultiPatchRevisionStatus) *api.MultiPatchRevisionStatus {
+	if in == nil {
+		return nil
+	}
+	out := &api.MultiPatchRevisionStatus{BaseRevision: in.BaseRevision, HeadRevision: in.HeadRevision}
+	out.PatchStatuses = make([]api.PatchRevisionStatus, len(in.PatchStatuses))
+	copy(out.PatchStatuses, in.PatchStatuses)
+	for i := range out.PatchStatuses {
+		out.PatchStatuses[i].Conditions = append([]metav1.Condition(nil), in.PatchStatuses[i].Conditions...)
+	}
+	return out
+}
+
+func (r *xSetCommonReconciler) emitMultiPatchConditionEvents(instance api.XSetObject, oldStatus, newStatus *api.MultiPatchRevisionStatus) {
+	oldByID := make(map[string]api.PatchRevisionStatus)
+	if oldStatus != nil {
+		for i := range oldStatus.PatchStatuses {
+			oldByID[oldStatus.PatchStatuses[i].ID] = oldStatus.PatchStatuses[i]
+		}
+	}
+	if newStatus == nil {
+		return
+	}
+	for i := range newStatus.PatchStatuses {
+		current := &newStatus.PatchStatuses[i]
+		previous := oldByID[current.ID]
+		r.emitPatchConditionEvent(instance, current.ID, previous.Conditions, current.Conditions, api.PatchConditionAvailable, corev1.EventTypeNormal, "PatchAvailable")
+		r.emitPatchConditionEvent(instance, current.ID, previous.Conditions, current.Conditions, api.PatchConditionPaused, corev1.EventTypeNormal, "PatchPaused")
+		r.emitPatchConditionEvent(instance, current.ID, previous.Conditions, current.Conditions, api.PatchConditionWithdrawing, corev1.EventTypeNormal, "PatchWithdrawing")
+		r.emitPatchConditionEvent(instance, current.ID, previous.Conditions, current.Conditions, api.PatchConditionDegraded, corev1.EventTypeWarning, "PatchDegraded")
+	}
+}
+
+func (r *xSetCommonReconciler) emitPatchConditionEvent(instance api.XSetObject, patchID string, oldConditions, newConditions []metav1.Condition, conditionType, eventType, reason string) {
+	oldCondition := meta.FindStatusCondition(oldConditions, conditionType)
+	newCondition := meta.FindStatusCondition(newConditions, conditionType)
+	if newCondition == nil || newCondition.Status != metav1.ConditionTrue || (oldCondition != nil && oldCondition.Status == metav1.ConditionTrue) {
+		return
+	}
+	r.Recorder.Eventf(instance, eventType, reason, "patch %s: %s", patchID, newCondition.Message)
 }
 
 func (r *xSetCommonReconciler) doSync(ctx context.Context, instance api.XSetObject, syncContext *synccontrols.SyncContext) (*time.Duration, error) {

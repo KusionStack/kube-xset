@@ -54,6 +54,9 @@ func BuildRevisionCatalog(base *appsv1.ControllerRevision, history []*appsv1.Con
 	if err := ValidateRevisionPlanForPlanning(plan); err != nil {
 		return nil, err
 	}
+	if plan == nil {
+		plan = &api.RevisionPlan{}
+	}
 	if len(plan.ActivePatches) > DefaultMaxActivePatches {
 		return nil, fmt.Errorf("active patch count %d exceeds catalog limit %d", len(plan.ActivePatches), DefaultMaxActivePatches)
 	}

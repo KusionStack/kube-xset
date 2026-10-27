@@ -19,17 +19,22 @@ package synccontrols
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"sort"
 	"strings"
 
 	appsv1 "k8s.io/api/apps/v1"
+	apiMeta "k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
 	"kusionstack.io/kube-xset/api"
+	"kusionstack.io/kube-xset/features"
 	xsetpatches "kusionstack.io/kube-xset/patches"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 )
+
+var ErrConcurrentPatchRolloutDisabled = errors.New("ConcurrentPatchRollout feature gate is disabled")
 
 type multiPatchIdentity struct {
 	ID           int
@@ -48,6 +53,9 @@ type MultiPatchSyncContext struct {
 	InstancePlans    map[int]xsetpatches.InstancePlan
 	CurrentPatchIDs  map[int][]string
 	DesiredRevisions map[int]*appsv1.ControllerRevision
+	Generation       int64
+	Suspended        bool
+	SyncError        error
 }
 
 func (r *RealSyncControl) prepareMultiPatch(ctx context.Context, xsetObject api.XSetObject, syncContext *SyncContext) error {
@@ -98,6 +106,13 @@ func (r *RealSyncControl) prepareMultiPatch(ctx context.Context, xsetObject api.
 	)
 	if err != nil {
 		return err
+	}
+	state.Generation = xsetObject.GetGeneration()
+	if !features.DefaultFeatureGate.Enabled(features.ConcurrentPatchRollout) {
+		state.Suspended = true
+		state.SyncError = ErrConcurrentPatchRolloutDisabled
+		syncContext.MultiPatch = state
+		return ErrConcurrentPatchRolloutDisabled
 	}
 
 	knownRevisions := make(map[string]struct{}, len(syncContext.Revisions))
@@ -265,9 +280,14 @@ func (r *RealSyncControl) calculateMultiPatchStatus(syncContext *SyncContext) {
 		return
 	}
 	statuses := make(map[string]*api.PatchRevisionStatus, len(state.Plan.ActivePatches))
+	oldStatuses := make(map[string]api.PatchRevisionStatus, len(state.Status.PatchStatuses))
+	for i := range state.Status.PatchStatuses {
+		oldStatuses[state.Status.PatchStatuses[i].ID] = state.Status.PatchStatuses[i]
+	}
 	for i := range state.Plan.ActivePatches {
 		patch := &state.Plan.ActivePatches[i]
 		status := &api.PatchRevisionStatus{ID: patch.ID}
+		status.Conditions = append([]metav1.Condition(nil), oldStatuses[patch.ID].Conditions...)
 		if patch.Rollout.Type == api.PatchRolloutStrategyTypeByLabel {
 			status.CommandLabelKey = r.xsetController.(api.MultiPatchXSetOperation).MultiPatchCommandLabelPrefix() + patch.ID
 		}
@@ -317,8 +337,98 @@ func (r *RealSyncControl) calculateMultiPatchStatus(syncContext *SyncContext) {
 	sort.Strings(ids)
 	state.Status.PatchStatuses = make([]api.PatchRevisionStatus, 0, len(ids))
 	for _, id := range ids {
-		state.Status.PatchStatuses = append(state.Status.PatchStatuses, *statuses[id])
+		status := statuses[id]
+		patch := findPatchByID(state.Plan, id)
+		setMultiPatchConditions(patch, status, state)
+		state.Status.PatchStatuses = append(state.Status.PatchStatuses, *status)
 	}
+}
+
+func findPatchByID(plan *api.RevisionPlan, id string) *api.PatchRevision {
+	if plan == nil {
+		return nil
+	}
+	for i := range plan.ActivePatches {
+		if plan.ActivePatches[i].ID == id {
+			return &plan.ActivePatches[i]
+		}
+	}
+	return nil
+}
+
+func setMultiPatchConditions(patch *api.PatchRevision, status *api.PatchRevisionStatus, state *MultiPatchSyncContext) {
+	if patch == nil || status == nil || state == nil {
+		return
+	}
+	pendingCommands := status.PendingApplyCommands + status.PendingRemoveCommands
+	complete := status.UpdatedReplicas == status.SelectedReplicas && pendingCommands == 0
+	progressing := !patch.Rollout.Paused && !state.Suspended && !complete
+	rollout := xsetpatches.DefaultRollout(patch.Rollout)
+	available := rollout.TargetState != api.PatchTargetStateAbsent && complete && status.AvailableReplicas == status.SelectedReplicas
+	progressReason := conditionReason(progressing, "RolloutInProgress", "RolloutComplete")
+	progressMessage := conditionMessage(progressing, "patch rollout is progressing", "patch rollout reached its selected instances")
+	if !complete && !progressing {
+		progressReason = "RolloutPaused"
+		progressMessage = "patch rollout has remaining work but is paused"
+	}
+	setPatchCondition(status, state.Generation, api.PatchConditionProgressing, progressing, progressReason, progressMessage)
+	setPatchCondition(status, state.Generation, api.PatchConditionAvailable, available,
+		conditionReason(available, "SelectedInstancesAvailable", "SelectedInstancesUnavailable"),
+		conditionMessage(available, "all selected instances are available", "not all selected instances are available"))
+	paused := rollout.Paused || state.Suspended
+	pausedReason := "RolloutRunning"
+	pausedMessage := "patch rollout is not paused"
+	if rollout.Paused {
+		pausedReason = "RolloutPaused"
+		pausedMessage = "patch rollout is paused by its rollout policy"
+	} else if state.Suspended {
+		pausedReason = "FeatureGateDisabled"
+		pausedMessage = ErrConcurrentPatchRolloutDisabled.Error()
+	}
+	setPatchCondition(status, state.Generation, api.PatchConditionPaused, paused, pausedReason, pausedMessage)
+	withdrawing := rollout.TargetState == api.PatchTargetStateAbsent
+	setPatchCondition(status, state.Generation, api.PatchConditionWithdrawing, withdrawing,
+		conditionReason(withdrawing, "TargetStateAbsent", "TargetStateApplied"),
+		conditionMessage(withdrawing, "patch is being removed from instances", "patch target state is applied"))
+	degraded := state.SyncError != nil
+	degradedReason := "ReconcileSucceeded"
+	degradedMessage := "patch reconciliation is healthy"
+	if degraded {
+		degradedReason = "ReconcileFailed"
+		degradedMessage = state.SyncError.Error()
+		if errors.Is(state.SyncError, ErrConcurrentPatchRolloutDisabled) {
+			degradedReason = "FeatureGateDisabled"
+		}
+	}
+	setPatchCondition(status, state.Generation, api.PatchConditionDegraded, degraded, degradedReason, degradedMessage)
+}
+
+func setPatchCondition(status *api.PatchRevisionStatus, generation int64, conditionType string, truth bool, reason, message string) {
+	conditionStatus := metav1.ConditionFalse
+	if truth {
+		conditionStatus = metav1.ConditionTrue
+	}
+	apiMeta.SetStatusCondition(&status.Conditions, metav1.Condition{
+		Type:               conditionType,
+		Status:             conditionStatus,
+		ObservedGeneration: generation,
+		Reason:             reason,
+		Message:            message,
+	})
+}
+
+func conditionReason(truth bool, trueReason, falseReason string) string {
+	if truth {
+		return trueReason
+	}
+	return falseReason
+}
+
+func conditionMessage(truth bool, trueMessage, falseMessage string) string {
+	if truth {
+		return trueMessage
+	}
+	return falseMessage
 }
 
 func containsPatchID(ids []string, want string) bool {

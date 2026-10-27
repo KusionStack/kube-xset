@@ -70,8 +70,15 @@ func CompactCompletedRevisionPlan(plan *api.RevisionPlan, status *api.MultiPatch
 		return result, nil
 	}
 	statusByID := make(map[string]api.PatchRevisionStatus, len(status.PatchStatuses))
+	duplicateStatus := false
 	for i := range status.PatchStatuses {
+		if _, exists := statusByID[status.PatchStatuses[i].ID]; exists {
+			duplicateStatus = true
+		}
 		statusByID[status.PatchStatuses[i].ID] = status.PatchStatuses[i]
+	}
+	if duplicateStatus {
+		return result, nil
 	}
 
 	removed := make([]string, 0)
@@ -81,7 +88,9 @@ func CompactCompletedRevisionPlan(plan *api.RevisionPlan, status *api.MultiPatch
 		rollout := DefaultRollout(patch.Rollout)
 		patchStatus, observed := statusByID[patch.ID]
 		if rollout.TargetState == api.PatchTargetStateAbsent && observed &&
+			patchStatus.SelectedReplicas == 0 &&
 			patchStatus.UpdatedReplicas == 0 &&
+			patchStatus.ReadyReplicas == 0 && patchStatus.AvailableReplicas == 0 &&
 			patchStatus.PendingApplyCommands == 0 && patchStatus.PendingRemoveCommands == 0 {
 			removed = append(removed, patch.ID)
 			continue
@@ -201,6 +210,9 @@ func ValidateRevisionPlan(plan *api.RevisionPlan) error {
 	if plan.Mode != api.RevisionModeConcurrentPatches {
 		return fmt.Errorf("unsupported revision mode %q", plan.Mode)
 	}
+	if len(plan.ActivePatches) > DefaultMaxActivePatches {
+		return fmt.Errorf("active patch count %d exceeds limit %d", len(plan.ActivePatches), DefaultMaxActivePatches)
+	}
 	if err := ValidateJournalIdentity(plan); err != nil {
 		return err
 	}
@@ -300,6 +312,9 @@ func validatePatchFieldSet(patchID, payloadName string, payload runtime.RawExten
 
 func validateRollout(patchID string, rollout api.PatchRolloutStrategy) error {
 	rollout = DefaultRollout(rollout)
+	if rollout.TargetState == api.PatchTargetStateAbsent && rollout.Paused {
+		return fmt.Errorf("patch %q cannot be paused while targetState is Absent", patchID)
+	}
 	if rollout.TargetState != api.PatchTargetStateApplied && rollout.TargetState != api.PatchTargetStateAbsent {
 		return fmt.Errorf("patch %q has unsupported targetState %q", patchID, rollout.TargetState)
 	}

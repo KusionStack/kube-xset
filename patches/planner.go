@@ -60,6 +60,16 @@ func PlanInstances(plan *api.RevisionPlan, instances []InstanceState, options Pl
 	if err := ValidateRevisionPlanForPlanning(plan); err != nil {
 		return nil, err
 	}
+	if plan == nil {
+		plan = &api.RevisionPlan{}
+	}
+	seenInstanceIDs := make(map[int]struct{}, len(instances))
+	for i := range instances {
+		if _, exists := seenInstanceIDs[instances[i].ID]; exists {
+			return nil, fmt.Errorf("duplicate instance id %d", instances[i].ID)
+		}
+		seenInstanceIDs[instances[i].ID] = struct{}{}
+	}
 	patchByID := make(map[string]*api.PatchRevision, len(plan.ActivePatches))
 	for i := range plan.ActivePatches {
 		patchByID[plan.ActivePatches[i].ID] = &plan.ActivePatches[i]
@@ -194,6 +204,9 @@ func buildPartitionMembership(plan *api.RevisionPlan, instances []InstanceState)
 // enabled multi-patch plan.
 func ValidateRevisionPlanForPlanning(plan *api.RevisionPlan) error {
 	if plan == nil {
+		return nil
+	}
+	if plan.Mode == "" && len(plan.ActivePatches) == 0 {
 		return nil
 	}
 	if plan.Mode != api.RevisionModeConcurrentPatches {

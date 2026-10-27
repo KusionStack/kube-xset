@@ -36,6 +36,7 @@ type FieldPath struct {
 
 type pathElement struct {
 	field     string
+	quoted    bool
 	selectors []selector
 }
 
@@ -56,19 +57,35 @@ func ParseFieldPath(raw string) (FieldPath, error) {
 
 	var result FieldPath
 	for i := 1; i < len(raw); {
-		start := i
-		for i < len(raw) && raw[i] != '.' && raw[i] != '[' {
-			i++
-		}
-		if start == i {
-			return FieldPath{}, fmt.Errorf("field path %q contains an empty field", raw)
-		}
+		if raw[i] == '[' {
+			end, err := selectorEnd(raw, i)
+			if err != nil {
+				return FieldPath{}, err
+			}
+			field, ok, err := parseQuotedField(raw[i+1 : end])
+			if err != nil {
+				return FieldPath{}, fmt.Errorf("invalid quoted field in path %q: %w", raw, err)
+			}
+			if !ok {
+				return FieldPath{}, fmt.Errorf("field path %q contains an empty field", raw)
+			}
+			result.elements = append(result.elements, pathElement{field: field, quoted: true})
+			i = end + 1
+		} else {
+			start := i
+			for i < len(raw) && raw[i] != '.' && raw[i] != '[' {
+				i++
+			}
+			if start == i {
+				return FieldPath{}, fmt.Errorf("field path %q contains an empty field", raw)
+			}
 
-		element := pathElement{field: raw[start:i]}
-		if strings.TrimSpace(element.field) != element.field {
-			return FieldPath{}, fmt.Errorf("field path %q contains whitespace in field %q", raw, element.field)
+			element := pathElement{field: raw[start:i]}
+			if strings.TrimSpace(element.field) != element.field {
+				return FieldPath{}, fmt.Errorf("field path %q contains whitespace in field %q", raw, element.field)
+			}
+			result.elements = append(result.elements, element)
 		}
-		result.elements = append(result.elements, element)
 
 		for i < len(raw) && raw[i] == '[' {
 			end, err := selectorEnd(raw, i)
@@ -76,6 +93,14 @@ func ParseFieldPath(raw string) (FieldPath, error) {
 				return FieldPath{}, err
 			}
 			content := strings.TrimSpace(raw[i+1 : end])
+			if field, ok, parseErr := parseQuotedField(content); ok || parseErr != nil {
+				if parseErr != nil {
+					return FieldPath{}, fmt.Errorf("invalid quoted field in path %q: %w", raw, parseErr)
+				}
+				result.elements = append(result.elements, pathElement{field: field, quoted: true})
+				i = end + 1
+				continue
+			}
 			if !strings.Contains(content, "=") {
 				// The collection is addressed by position (or by an unknown
 				// non-keyed syntax), so the whole collection is the conflict root.
@@ -111,6 +136,7 @@ func ParseFieldPath(raw string) (FieldPath, error) {
 
 func normalizeFieldPath(result FieldPath, raw string) (FieldPath, error) {
 	for i := range result.elements {
+		result.elements[i].quoted = needsQuotedField(result.elements[i].field)
 		selectors := result.elements[i].selectors
 		sort.Slice(selectors, func(a, b int) bool {
 			if selectors[a].key == selectors[b].key {
@@ -125,6 +151,36 @@ func normalizeFieldPath(result FieldPath, raw string) (FieldPath, error) {
 		}
 	}
 	return result, nil
+}
+
+func parseQuotedField(raw string) (string, bool, error) {
+	value := strings.TrimSpace(raw)
+	if value == "" || value[0] != '"' {
+		return "", false, nil
+	}
+	field, err := strconv.Unquote(value)
+	if err != nil {
+		return "", true, err
+	}
+	return field, true, nil
+}
+
+func needsQuotedField(field string) bool {
+	if field == "" {
+		return true
+	}
+	for _, r := range field {
+		if unicode.IsLetter(r) || unicode.IsDigit(r) {
+			continue
+		}
+		switch r {
+		case '_', '-', '/', ':', '$':
+			continue
+		default:
+			return true
+		}
+	}
+	return false
 }
 
 func selectorEnd(path string, start int) (int, error) {
@@ -217,8 +273,17 @@ func splitSelectorParts(raw string) ([]string, error) {
 func (p FieldPath) String() string {
 	var b strings.Builder
 	for _, element := range p.elements {
-		b.WriteByte('.')
-		b.WriteString(element.field)
+		if element.quoted {
+			if b.Len() == 0 {
+				b.WriteByte('.')
+			}
+			b.WriteByte('[')
+			b.WriteString(strconv.Quote(element.field))
+			b.WriteByte(']')
+		} else {
+			b.WriteByte('.')
+			b.WriteString(element.field)
+		}
 		if len(element.selectors) == 0 {
 			continue
 		}
@@ -267,6 +332,19 @@ func selectorsEqual(left, right []selector) bool {
 	}
 	for i := range left {
 		if left[i] != right[i] {
+			return false
+		}
+	}
+	return true
+}
+
+func isStrictParentPath(parent, child FieldPath) bool {
+	if len(parent.elements) >= len(child.elements) {
+		return false
+	}
+	for i := range parent.elements {
+		if parent.elements[i].field != child.elements[i].field ||
+			!selectorsEqual(parent.elements[i].selectors, child.elements[i].selectors) {
 			return false
 		}
 	}

@@ -62,6 +62,9 @@ func CaptureUpdate(oldTemplate, currentTemplate []byte, oldPlan, currentPlan *ap
 	if oldPlan.Mode == "" && currentPlan.Mode == api.RevisionModeConcurrentPatches && !jsonEqual(oldTemplate, currentTemplate) {
 		return nil, fmt.Errorf("cannot enable %q mode in the same update as a template change", api.RevisionModeConcurrentPatches)
 	}
+	if oldPlan.Mode == api.RevisionModeConcurrentPatches && currentPlan.Mode == "" && !jsonEqual(oldTemplate, currentTemplate) {
+		return nil, fmt.Errorf("cannot disable %q mode in the same update as a template change", api.RevisionModeConcurrentPatches)
+	}
 
 	patchID := options.PatchID
 	if patchID == "" {
@@ -72,6 +75,11 @@ func CaptureUpdate(oldTemplate, currentTemplate []byte, oldPlan, currentPlan *ap
 		return nil, err
 	}
 	resultPlan := &api.RevisionPlan{Mode: currentPlan.Mode, ActivePatches: journal}
+	// Scale-out policy belongs to every already-active patch, regardless of
+	// whether this API update also changes the template or withdraws a patch.
+	// Otherwise a combined scale+template update would skip DoNotApply and the
+	// newly allocated identities could join an older patch on the next plan.
+	applyScaleOutPolicy(resultPlan, options.OldReplicas, options.Replicas)
 
 	changedTarget, err := findTargetStateTransition(oldPlan, resultPlan)
 	if err != nil {
@@ -86,7 +94,6 @@ func CaptureUpdate(oldTemplate, currentTemplate []byte, oldPlan, currentPlan *ap
 		return nil, fmt.Errorf("build template patch: %w", err)
 	}
 	if len(fieldSet) == 0 {
-		applyScaleOutPolicy(resultPlan, options.OldReplicas, options.Replicas)
 		if err := ValidateRevisionPlan(resultPlan); err != nil {
 			return nil, err
 		}
@@ -171,8 +178,14 @@ func validateModeTransition(oldPlan, currentPlan *api.RevisionPlan) error {
 	if oldPlan.Mode != api.RevisionModeConcurrentPatches {
 		return fmt.Errorf("unsupported old revision mode %q", oldPlan.Mode)
 	}
+	if currentPlan.Mode == "" {
+		if len(oldPlan.ActivePatches) != 0 || len(currentPlan.ActivePatches) != 0 {
+			return fmt.Errorf("revision mode %q cannot be disabled while active patches remain", oldPlan.Mode)
+		}
+		return nil
+	}
 	if currentPlan.Mode != oldPlan.Mode {
-		return fmt.Errorf("revision mode %q cannot be disabled or changed", oldPlan.Mode)
+		return fmt.Errorf("revision mode %q cannot be changed to %q", oldPlan.Mode, currentPlan.Mode)
 	}
 	return nil
 }
@@ -279,6 +292,7 @@ func captureExplicitTargetTransition(oldTemplate, currentTemplate []byte, plan *
 func markWithdrawing(patch *api.PatchRevision) {
 	patch.Rollout = DefaultRollout(patch.Rollout)
 	patch.Rollout.TargetState = api.PatchTargetStateAbsent
+	patch.Rollout.Paused = false
 	if patch.Rollout.Type == api.PatchRolloutStrategyTypeByPartition {
 		zero := int32(0)
 		if patch.Rollout.ByPartition == nil {

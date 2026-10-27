@@ -24,6 +24,7 @@ import (
 
 	jsonpatch "github.com/evanphx/json-patch"
 	appsv1 "k8s.io/api/apps/v1"
+	apiMeta "k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	"kusionstack.io/kube-xset/api"
@@ -134,6 +135,85 @@ func TestBuildMultiPatchExecutionStateReconstructsBaseFromHead(t *testing.T) {
 	}
 	if got := state.CurrentPatchIDs[0]; !reflect.DeepEqual(got, []string{"p1"}) {
 		t.Fatalf("identity 0 current patches = %#v, want [p1]", got)
+	}
+}
+
+func TestBuildMultiPatchExecutionStateSurvivesControllerRestart(t *testing.T) {
+	r0 := multiPatchTestRevision("r0", 1, `{"spec":{"a":"0","b":"0"}}`)
+	r2 := multiPatchTestRevision("r2", 3, `{"spec":{"a":"1","b":"2"}}`)
+	partition := int32(1)
+	plan := &api.RevisionPlan{Mode: api.RevisionModeConcurrentPatches, ActivePatches: []api.PatchRevision{
+		multiPatchTestPatch(t, "p1", `.spec.a`, `"1"`, `"0"`, partition),
+		multiPatchTestPatch(t, "p2", `.spec.b`, `"2"`, `"0"`, partition),
+	}}
+	identities := []multiPatchIdentity{{ID: 0, RevisionName: "r0"}, {ID: 1, RevisionName: "r2"}}
+
+	first, err := buildMultiPatchExecutionState(plan, nil, r0, r2, []*appsv1.ControllerRevision{r0, r2}, identities, multiPatchTestRevisionBuilder, "patch/", "legacy")
+	if err != nil {
+		t.Fatalf("first buildMultiPatchExecutionState() error = %v", err)
+	}
+	persistedStatus := copyMultiPatchStatus(first.Status)
+
+	// A fresh process owns no in-memory catalog. It must derive the same
+	// vectors solely from the persisted plan, status, revisions and targets.
+	restarted, err := buildMultiPatchExecutionState(plan, persistedStatus, r0, r2, []*appsv1.ControllerRevision{r0, r2}, identities, multiPatchTestRevisionBuilder, "patch/", "legacy")
+	if err != nil {
+		t.Fatalf("restart buildMultiPatchExecutionState() error = %v", err)
+	}
+	if !reflect.DeepEqual(restarted.CurrentPatchIDs, first.CurrentPatchIDs) {
+		t.Fatalf("current vectors after restart = %#v, want %#v", restarted.CurrentPatchIDs, first.CurrentPatchIDs)
+	}
+	for id, firstPlan := range first.InstancePlans {
+		if got := restarted.InstancePlans[id].DesiredPatchIDs; !reflect.DeepEqual(got, firstPlan.DesiredPatchIDs) {
+			t.Fatalf("identity %d desired patches after restart = %#v, want %#v", id, got, firstPlan.DesiredPatchIDs)
+		}
+	}
+	if restarted.Status.BaseRevision != first.Status.BaseRevision || restarted.Status.HeadRevision != first.Status.HeadRevision {
+		t.Fatalf("status revisions after restart = %#v, want %#v", restarted.Status, first.Status)
+	}
+}
+
+func TestSetMultiPatchConditionsReportsProgressPauseAndFailure(t *testing.T) {
+	partition := int32(1)
+	patch := multiPatchTestPatch(t, "p1", `.spec.a`, `"1"`, `"0"`, partition)
+	status := &api.PatchRevisionStatus{ID: "p1", SelectedReplicas: 2, UpdatedReplicas: 1, AvailableReplicas: 1}
+	state := &MultiPatchSyncContext{Generation: 7}
+	setMultiPatchConditions(&patch, status, state)
+
+	assertPatchCondition(t, status, api.PatchConditionProgressing, metav1.ConditionTrue, "RolloutInProgress", 7)
+	assertPatchCondition(t, status, api.PatchConditionAvailable, metav1.ConditionFalse, "SelectedInstancesUnavailable", 7)
+	assertPatchCondition(t, status, api.PatchConditionPaused, metav1.ConditionFalse, "RolloutRunning", 7)
+	assertPatchCondition(t, status, api.PatchConditionWithdrawing, metav1.ConditionFalse, "TargetStateApplied", 7)
+	assertPatchCondition(t, status, api.PatchConditionDegraded, metav1.ConditionFalse, "ReconcileSucceeded", 7)
+
+	state.Suspended = true
+	state.SyncError = ErrConcurrentPatchRolloutDisabled
+	setMultiPatchConditions(&patch, status, state)
+	assertPatchCondition(t, status, api.PatchConditionProgressing, metav1.ConditionFalse, "RolloutPaused", 7)
+	assertPatchCondition(t, status, api.PatchConditionPaused, metav1.ConditionTrue, "FeatureGateDisabled", 7)
+	assertPatchCondition(t, status, api.PatchConditionDegraded, metav1.ConditionTrue, "FeatureGateDisabled", 7)
+}
+
+func TestSetMultiPatchConditionsReportsWithdrawal(t *testing.T) {
+	partition := int32(0)
+	patch := multiPatchTestPatch(t, "p1", `.spec.a`, `"1"`, `"0"`, partition)
+	patch.Rollout.TargetState = api.PatchTargetStateAbsent
+	status := &api.PatchRevisionStatus{ID: "p1"}
+	state := &MultiPatchSyncContext{Generation: 8}
+	setMultiPatchConditions(&patch, status, state)
+
+	assertPatchCondition(t, status, api.PatchConditionWithdrawing, metav1.ConditionTrue, "TargetStateAbsent", 8)
+	assertPatchCondition(t, status, api.PatchConditionAvailable, metav1.ConditionFalse, "SelectedInstancesUnavailable", 8)
+}
+
+func assertPatchCondition(t *testing.T, status *api.PatchRevisionStatus, conditionType string, wantStatus metav1.ConditionStatus, wantReason string, wantGeneration int64) {
+	t.Helper()
+	condition := apiMeta.FindStatusCondition(status.Conditions, conditionType)
+	if condition == nil {
+		t.Fatalf("condition %q not found in %#v", conditionType, status.Conditions)
+	}
+	if condition.Status != wantStatus || condition.Reason != wantReason || condition.ObservedGeneration != wantGeneration {
+		t.Fatalf("condition %q = %#v, want status=%s reason=%s generation=%d", conditionType, condition, wantStatus, wantReason, wantGeneration)
 	}
 }
 

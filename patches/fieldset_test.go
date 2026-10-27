@@ -32,6 +32,47 @@ func TestParseFieldPathCanonicalizesSelectors(t *testing.T) {
 	}
 }
 
+func TestParseFieldPathCanonicalizesQuotedMapKeys(t *testing.T) {
+	tests := []struct {
+		name string
+		raw  string
+		want string
+	}{
+		{
+			name: "kubernetes qualified label key",
+			raw:  `.metadata.labels["app.kubernetes.io/name"]`,
+			want: `.metadata.labels["app.kubernetes.io/name"]`,
+		},
+		{
+			name: "quotes brackets and backslashes",
+			raw:  `.metadata.annotations["example.com/a]b\\\"c"]`,
+			want: `.metadata.annotations["example.com/a]b\\\"c"]`,
+		},
+		{
+			name: "simple quoted key normalizes to dot notation",
+			raw:  `.metadata.labels["team"]`,
+			want: `.metadata.labels.team`,
+		},
+		{
+			name: "quoted root key",
+			raw:  `.["root.with.dot"].child`,
+			want: `.["root.with.dot"].child`,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			path, err := ParseFieldPath(tt.raw)
+			if err != nil {
+				t.Fatalf("ParseFieldPath() error = %v", err)
+			}
+			if got := path.String(); got != tt.want {
+				t.Fatalf("ParseFieldPath().String() = %q, want %q", got, tt.want)
+			}
+		})
+	}
+}
+
 func TestCanonicalFieldSetCollapsesArrayIndices(t *testing.T) {
 	got, err := CanonicalFieldSet([]string{
 		`.spec.containers[1].image`,
@@ -64,6 +105,11 @@ func TestFieldPathConflicts(t *testing.T) {
 		{name: "different keyed items", left: `.spec.env[name="LOG_LEVEL"].value`, right: `.spec.env[name="PORT"].value`, want: false},
 		{name: "keyed list root and item", left: `.spec.env`, right: `.spec.env[name="PORT"].value`, want: true},
 		{name: "granular map keys", left: `.metadata.labels.team`, right: `.metadata.labels.zone`, want: false},
+		{name: "qualified granular map keys", left: `.metadata.labels["app.kubernetes.io/name"]`, right: `.metadata.labels["app.kubernetes.io/version"]`, want: false},
+		{name: "same qualified granular map key", left: `.metadata.labels["app.kubernetes.io/name"]`, right: `.metadata.labels["app.kubernetes.io/name"]`, want: true},
+		{name: "map root and qualified key", left: `.metadata.labels`, right: `.metadata.labels["app.kubernetes.io/name"]`, want: true},
+		{name: "qualified key parent child", left: `.spec.settings["example.com/config"]`, right: `.spec.settings["example.com/config"].enabled`, want: true},
+		{name: "plain and quoted simple key", left: `.metadata.labels.team`, right: `.metadata.labels["team"]`, want: true},
 	}
 
 	for _, tt := range tests {
@@ -106,6 +152,8 @@ func TestParseFieldPathRejectsInvalidSelectors(t *testing.T) {
 		`spec.runtime.artifact`,
 		`.spec.env[name="unterminated].value`,
 		`.spec.env[name="a",name="b"].value`,
+		`.metadata.labels["unterminated]`,
+		`.metadata.labels["key" trailing]`,
 		`.spec..runtime`,
 	} {
 		t.Run(raw, func(t *testing.T) {

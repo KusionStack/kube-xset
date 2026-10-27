@@ -20,6 +20,7 @@ import (
 	"bytes"
 	"encoding/json"
 	"fmt"
+	"io"
 	"reflect"
 	"sort"
 	"strconv"
@@ -32,10 +33,13 @@ const SemanticPatchType = "SemanticPatch"
 
 // Schema records the collection semantics needed to produce stable paths.
 // A path absent from MapLists is treated as an atomic/unkeyed list. Paths in
-// AtomicPaths are emitted as a single operation even when they contain maps.
+// GranularMaps are diffed per map key even when the map is added or removed as
+// a whole. Paths in AtomicPaths are emitted as one operation and take
+// precedence over GranularMaps.
 type Schema struct {
-	MapLists    map[string][]string
-	AtomicPaths []string
+	MapLists     map[string][]string
+	GranularMaps []string
+	AtomicPaths  []string
 }
 
 // PatchDocument is an order-independent, idempotent collection of Set/Delete
@@ -46,15 +50,19 @@ type PatchDocument struct {
 }
 
 type Operation struct {
-	Path   string          `json:"path"`
-	Value  json.RawMessage `json:"value,omitempty"`
-	Remove bool            `json:"remove,omitempty"`
+	Path           string          `json:"path"`
+	Value          json.RawMessage `json:"value,omitempty"`
+	Remove         bool            `json:"remove,omitempty"`
+	PruneEmptyPath string          `json:"pruneEmptyPath,omitempty"`
 }
 
 // BuildPatchPair builds forward and reverse semantic patches. Applying the
 // forward patch to oldTemplate yields newTemplate; applying reverse restores
 // oldTemplate without touching independent keyed-list items.
 func BuildPatchPair(oldTemplate, newTemplate []byte, schema Schema) (runtime.RawExtension, runtime.RawExtension, []string, error) {
+	if err := schema.validate(); err != nil {
+		return runtime.RawExtension{}, runtime.RawExtension{}, nil, err
+	}
 	oldValue, err := decodeJSON(oldTemplate)
 	if err != nil {
 		return runtime.RawExtension{}, runtime.RawExtension{}, nil, fmt.Errorf("decode old template: %w", err)
@@ -122,6 +130,15 @@ func Apply(template []byte, patch runtime.RawExtension) ([]byte, error) {
 		if err := applyAt(value, path.elements, operation.Remove, operationValue); err != nil {
 			return nil, fmt.Errorf("apply %q: %w", operation.Path, err)
 		}
+		if operation.PruneEmptyPath != "" {
+			prunePath, parseErr := ParseFieldPath(operation.PruneEmptyPath)
+			if parseErr != nil {
+				return nil, fmt.Errorf("operation %d prune path: %w", i, parseErr)
+			}
+			if err := pruneEmptyMapAt(value, prunePath.elements); err != nil {
+				return nil, fmt.Errorf("prune %q: %w", operation.PruneEmptyPath, err)
+			}
+		}
 	}
 	return json.Marshal(value)
 }
@@ -156,6 +173,7 @@ func decodePatch(patch runtime.RawExtension) (*PatchDocument, error) {
 		return nil, fmt.Errorf("unsupported patch type %q", document.Type)
 	}
 	seen := make(map[string]struct{}, len(document.Operations))
+	parsedPaths := make([]FieldPath, 0, len(document.Operations))
 	for i := range document.Operations {
 		operation := &document.Operations[i]
 		path, err := ParseFieldPath(operation.Path)
@@ -168,9 +186,33 @@ func decodePatch(patch runtime.RawExtension) (*PatchDocument, error) {
 		if _, exists := seen[operation.Path]; exists {
 			return nil, fmt.Errorf("duplicate operation path %q", operation.Path)
 		}
+		for j := range parsedPaths {
+			if path.Conflicts(parsedPaths[j]) {
+				return nil, fmt.Errorf("operation paths %q and %q overlap", document.Operations[j].Path, operation.Path)
+			}
+		}
+		parsedPaths = append(parsedPaths, path)
 		seen[operation.Path] = struct{}{}
+		if operation.Remove && len(operation.Value) != 0 {
+			return nil, fmt.Errorf("remove operation %q must not contain a value", operation.Path)
+		}
 		if !operation.Remove && len(operation.Value) == 0 {
 			return nil, fmt.Errorf("set operation %q has no value", operation.Path)
+		}
+		if operation.PruneEmptyPath != "" {
+			if !operation.Remove {
+				return nil, fmt.Errorf("set operation %q must not prune an empty map", operation.Path)
+			}
+			prunePath, err := ParseFieldPath(operation.PruneEmptyPath)
+			if err != nil {
+				return nil, fmt.Errorf("operation %d has invalid prune path: %w", i, err)
+			}
+			if prunePath.String() != operation.PruneEmptyPath {
+				return nil, fmt.Errorf("operation prune path %q is not canonical; use %q", operation.PruneEmptyPath, prunePath.String())
+			}
+			if !isStrictParentPath(prunePath, path) {
+				return nil, fmt.Errorf("operation prune path %q must be a parent of %q", operation.PruneEmptyPath, operation.Path)
+			}
 		}
 	}
 	return document, nil
@@ -183,8 +225,12 @@ func decodeJSON(raw []byte) (interface{}, error) {
 	if err := decoder.Decode(&value); err != nil {
 		return nil, err
 	}
-	if decoder.More() {
-		return nil, fmt.Errorf("multiple JSON values")
+	var extra interface{}
+	if err := decoder.Decode(&extra); err != io.EOF {
+		if err == nil {
+			return nil, fmt.Errorf("multiple JSON values")
+		}
+		return nil, err
 	}
 	return value, nil
 }
@@ -200,37 +246,7 @@ func diffValue(path string, oldValue, newValue interface{}, schema Schema) ([]Op
 	oldMap, oldIsMap := oldValue.(map[string]interface{})
 	newMap, newIsMap := newValue.(map[string]interface{})
 	if oldIsMap && newIsMap {
-		keys := make(map[string]struct{}, len(oldMap)+len(newMap))
-		for key := range oldMap {
-			keys[key] = struct{}{}
-		}
-		for key := range newMap {
-			keys[key] = struct{}{}
-		}
-		ordered := make([]string, 0, len(keys))
-		for key := range keys {
-			ordered = append(ordered, key)
-		}
-		sort.Strings(ordered)
-		var operations []Operation
-		for _, key := range ordered {
-			childPath := joinField(path, key)
-			oldChild, oldExists := oldMap[key]
-			newChild, newExists := newMap[key]
-			switch {
-			case oldExists && !newExists:
-				operations = append(operations, Operation{Path: childPath, Remove: true})
-			case !oldExists && newExists:
-				operations = append(operations, setOperation(childPath, newChild))
-			default:
-				childOperations, err := diffValue(childPath, oldChild, newChild, schema)
-				if err != nil {
-					return nil, err
-				}
-				operations = append(operations, childOperations...)
-			}
-		}
-		return operations, nil
+		return diffMaps(path, oldMap, newMap, schema, "")
 	}
 
 	oldList, oldIsList := oldValue.([]interface{})
@@ -247,6 +263,60 @@ func diffValue(path string, oldValue, newValue interface{}, schema Schema) ([]Op
 		return nil, fmt.Errorf("template root must remain an object")
 	}
 	return []Operation{setOperation(path, newValue)}, nil
+}
+
+func diffMaps(path string, oldMap, newMap map[string]interface{}, schema Schema, pruneEmptyPath string) ([]Operation, error) {
+	keys := make(map[string]struct{}, len(oldMap)+len(newMap))
+	for key := range oldMap {
+		keys[key] = struct{}{}
+	}
+	for key := range newMap {
+		keys[key] = struct{}{}
+	}
+	ordered := make([]string, 0, len(keys))
+	for key := range keys {
+		ordered = append(ordered, key)
+	}
+	sort.Strings(ordered)
+	var operations []Operation
+	for _, key := range ordered {
+		childPath := joinField(path, key)
+		oldChild, oldExists := oldMap[key]
+		newChild, newExists := newMap[key]
+		switch {
+		case oldExists && !newExists:
+			if childMap, ok := oldChild.(map[string]interface{}); ok && schema.isGranularMap(childPath) && !schema.isAtomic(childPath) {
+				childOperations, err := diffMaps(childPath, childMap, map[string]interface{}{}, schema, childPath)
+				if err != nil {
+					return nil, err
+				}
+				operations = append(operations, childOperations...)
+			} else {
+				operation := Operation{Path: childPath, Remove: true}
+				if pruneEmptyPath != "" {
+					operation.PruneEmptyPath = pruneEmptyPath
+				}
+				operations = append(operations, operation)
+			}
+		case !oldExists && newExists:
+			if childMap, ok := newChild.(map[string]interface{}); ok && schema.isGranularMap(childPath) && !schema.isAtomic(childPath) {
+				childOperations, err := diffMaps(childPath, map[string]interface{}{}, childMap, schema, "")
+				if err != nil {
+					return nil, err
+				}
+				operations = append(operations, childOperations...)
+			} else {
+				operations = append(operations, setOperation(childPath, newChild))
+			}
+		default:
+			childOperations, err := diffValue(childPath, oldChild, newChild, schema)
+			if err != nil {
+				return nil, err
+			}
+			operations = append(operations, childOperations...)
+		}
+	}
+	return operations, nil
 }
 
 func diffMapList(path string, oldList, newList []interface{}, keys []string, schema Schema) ([]Operation, error) {
@@ -344,6 +414,13 @@ func setOperation(path string, value interface{}) Operation {
 }
 
 func joinField(parent, field string) string {
+	if needsQuotedField(field) {
+		quoted := "[" + strconv.Quote(field) + "]"
+		if parent == "" {
+			return "." + quoted
+		}
+		return parent + quoted
+	}
 	if parent == "" {
 		return "." + field
 	}
@@ -359,6 +436,59 @@ func (s Schema) isAtomic(path string) bool {
 	return false
 }
 
+func (s Schema) isGranularMap(path string) bool {
+	for _, candidate := range s.GranularMaps {
+		if candidate == path {
+			return true
+		}
+	}
+	return false
+}
+
+func (s Schema) validate() error {
+	validatePaths := func(kind string, paths []string) error {
+		for _, raw := range paths {
+			path, err := ParseFieldPath(raw)
+			if err != nil {
+				return fmt.Errorf("invalid %s path %q: %w", kind, raw, err)
+			}
+			if canonical := path.String(); canonical != raw {
+				return fmt.Errorf("%s path %q is not canonical; use %q", kind, raw, canonical)
+			}
+		}
+		return nil
+	}
+	if err := validatePaths("granular map", s.GranularMaps); err != nil {
+		return err
+	}
+	if err := validatePaths("atomic", s.AtomicPaths); err != nil {
+		return err
+	}
+	for raw, keys := range s.MapLists {
+		path, err := ParseFieldPath(raw)
+		if err != nil {
+			return fmt.Errorf("invalid map-list path %q: %w", raw, err)
+		}
+		if canonical := path.String(); canonical != raw {
+			return fmt.Errorf("map-list path %q is not canonical; use %q", raw, canonical)
+		}
+		if len(keys) == 0 {
+			return fmt.Errorf("map-list path %q must declare at least one key", raw)
+		}
+		seen := make(map[string]struct{}, len(keys))
+		for _, key := range keys {
+			if _, exists := seen[key]; exists {
+				return fmt.Errorf("map-list path %q repeats key %q", raw, key)
+			}
+			seen[key] = struct{}{}
+			if _, err := ParseFieldPath(raw + "[" + key + "=\"value\"]"); err != nil {
+				return fmt.Errorf("map-list path %q has invalid key %q: %w", raw, key, err)
+			}
+		}
+	}
+	return nil
+}
+
 func applyAt(root interface{}, elements []pathElement, remove bool, value interface{}) error {
 	if len(elements) == 0 {
 		return fmt.Errorf("empty path")
@@ -368,6 +498,60 @@ func applyAt(root interface{}, elements []pathElement, remove bool, value interf
 		return fmt.Errorf("root is %T, want object", root)
 	}
 	return applyObject(object, elements, remove, value)
+}
+
+func pruneEmptyMapAt(root interface{}, elements []pathElement) error {
+	if len(elements) == 0 {
+		return fmt.Errorf("empty prune path")
+	}
+	object, ok := root.(map[string]interface{})
+	if !ok {
+		return fmt.Errorf("root is %T, want object", root)
+	}
+	return pruneEmptyMapInObject(object, elements)
+}
+
+func pruneEmptyMapInObject(object map[string]interface{}, elements []pathElement) error {
+	element := elements[0]
+	last := len(elements) == 1
+	if len(element.selectors) == 0 {
+		child, exists := object[element.field]
+		if !exists || child == nil {
+			return nil
+		}
+		childObject, ok := child.(map[string]interface{})
+		if !ok {
+			return fmt.Errorf("field %q is %T, want object", element.field, child)
+		}
+		if last {
+			if len(childObject) == 0 {
+				delete(object, element.field)
+			}
+			return nil
+		}
+		return pruneEmptyMapInObject(childObject, elements[1:])
+	}
+
+	listValue, exists := object[element.field]
+	if !exists || listValue == nil {
+		return nil
+	}
+	list, ok := listValue.([]interface{})
+	if !ok {
+		return fmt.Errorf("field %q is %T, want list", element.field, listValue)
+	}
+	index := findSelectedItem(list, element.selectors)
+	if index < 0 {
+		return nil
+	}
+	item, ok := list[index].(map[string]interface{})
+	if !ok {
+		return fmt.Errorf("selected item in %q is %T, want object", element.field, list[index])
+	}
+	if last {
+		return fmt.Errorf("prune path %q selects a list item, want map field", element.field)
+	}
+	return pruneEmptyMapInObject(item, elements[1:])
 }
 
 func applyObject(object map[string]interface{}, elements []pathElement, remove bool, value interface{}) error {

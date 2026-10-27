@@ -100,3 +100,13 @@ type PatchRevisionStatus struct {
 	PendingRemoveCommands int32              `json:"pendingRemoveCommands,omitempty"`
 	Conditions            []metav1.Condition `json:"conditions,omitempty"`
 }
+
+// Per-patch condition types. Conditions are intentionally orthogonal: for
+// example a patch can be Withdrawing and Progressing at the same time.
+const (
+	PatchConditionProgressing = "Progressing"
+	PatchConditionAvailable   = "Available"
+	PatchConditionPaused      = "Paused"
+	PatchConditionWithdrawing = "Withdrawing"
+	PatchConditionDegraded    = "Degraded"
+)

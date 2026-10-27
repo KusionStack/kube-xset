@@ -52,6 +52,21 @@ func TestBuildRevisionCatalogReusesHistoryAndSynthesizesMissingStates(t *testing
 	}
 }
 
+func TestBuildRevisionCatalogAcceptsNilPlan(t *testing.T) {
+	base := testRevision("base", 1, `{"spec":{"value":"v1"}}`)
+	catalog, err := BuildRevisionCatalog(base, nil, nil, testRevisionBuilder)
+	if err != nil {
+		t.Fatalf("BuildRevisionCatalog() error = %v", err)
+	}
+	revision, ok := catalog.RevisionFor(nil)
+	if !ok || revision == nil {
+		t.Fatal("base vector is missing from catalog")
+	}
+	if got := len(catalog.SyntheticRevisions()); got != 1 {
+		t.Fatalf("len(SyntheticRevisions()) = %d, want 1", got)
+	}
+}
+
 func TestBuildRevisionCatalogPrefersNewestEquivalentHistory(t *testing.T) {
 	base := testRevision("r0", 1, `{"spec":{"a":"0"}}`)
 	revertedHead := testRevision("r3", 4, `{"spec":{"a":"0"}}`)

@@ -54,6 +54,31 @@ func TestPlanInstancesIndependentPartitionsAndRollback(t *testing.T) {
 	}
 }
 
+func TestPlanInstancesAcceptsNilAndEmptyPlan(t *testing.T) {
+	instances := []InstanceState{{ID: 2}, {ID: 1}}
+	for _, plan := range []*api.RevisionPlan{nil, {}} {
+		planned, err := PlanInstances(plan, instances, PlanOptions{BaseRevision: "base"})
+		if err != nil {
+			t.Fatalf("PlanInstances(%#v) error = %v", plan, err)
+		}
+		if len(planned) != 2 || planned[0].ID != 1 || planned[1].ID != 2 {
+			t.Fatalf("PlanInstances(%#v) = %#v, want sorted identities", plan, planned)
+		}
+		for i := range planned {
+			if len(planned[i].DesiredPatchIDs) != 0 {
+				t.Fatalf("identity %d desired patches = %v, want none", planned[i].ID, planned[i].DesiredPatchIDs)
+			}
+		}
+	}
+}
+
+func TestPlanInstancesRejectsDuplicateIdentityIDs(t *testing.T) {
+	_, err := PlanInstances(&api.RevisionPlan{Mode: api.RevisionModeConcurrentPatches}, []InstanceState{{ID: 1}, {ID: 1}}, PlanOptions{})
+	if err == nil || !strings.Contains(err.Error(), "duplicate instance id") {
+		t.Fatalf("PlanInstances() error = %v, want duplicate identity rejection", err)
+	}
+}
+
 func TestPlanInstancesPartitionUsesOrdinalPositionWhenIDsHaveHoles(t *testing.T) {
 	partition := int32(2)
 	plan := &api.RevisionPlan{Mode: api.RevisionModeConcurrentPatches, ActivePatches: []api.PatchRevision{
@@ -186,6 +211,46 @@ func TestPlanInstancesScaleOutPreservesReachedPartitionCohort(t *testing.T) {
 	assertDesiredVectors(t, planned, map[int][]string{
 		0: {}, 1: {}, 2: {"p1"}, 3: {"p1"}, 4: {},
 	})
+}
+
+func TestPlanInstancesClampsPartitionAndRebalancesAfterScaleIn(t *testing.T) {
+	partition := int32(9)
+	plan := &api.RevisionPlan{Mode: api.RevisionModeConcurrentPatches, ActivePatches: []api.PatchRevision{
+		{ID: "p1", Rollout: partitionRollout(&partition)},
+	}}
+	instances := []InstanceState{
+		{ID: 0},
+		{ID: 4, AppliedPatchIDs: []string{"p1"}},
+	}
+
+	planned, err := PlanInstances(plan, instances, PlanOptions{})
+	if err != nil {
+		t.Fatalf("PlanInstances(over-large partition) error = %v", err)
+	}
+	assertDesiredVectors(t, planned, map[int][]string{0: {}, 4: {}})
+
+	// After scale-in, lowering partition to one keeps one of the two live
+	// identities selected. The already-reached identity wins, despite ID holes.
+	partition = 1
+	planned, err = PlanInstances(plan, instances, PlanOptions{})
+	if err != nil {
+		t.Fatalf("PlanInstances(scale-in rebalance) error = %v", err)
+	}
+	assertDesiredVectors(t, planned, map[int][]string{0: {}, 4: {"p1"}})
+}
+
+func TestPlanInstancesHandlesZeroReplicas(t *testing.T) {
+	partition := int32(0)
+	plan := &api.RevisionPlan{Mode: api.RevisionModeConcurrentPatches, ActivePatches: []api.PatchRevision{
+		{ID: "p1", Rollout: partitionRollout(&partition)},
+	}}
+	planned, err := PlanInstances(plan, nil, PlanOptions{BaseRevision: "base"})
+	if err != nil {
+		t.Fatalf("PlanInstances() error = %v", err)
+	}
+	if len(planned) != 0 {
+		t.Fatalf("PlanInstances() = %#v, want empty", planned)
+	}
 }
 
 func TestPlanInstancesAbsentWithdrawsFromEveryInstance(t *testing.T) {

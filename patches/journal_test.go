@@ -18,6 +18,7 @@ package patches
 
 import (
 	"encoding/json"
+	"fmt"
 	"reflect"
 	"strings"
 	"testing"
@@ -107,6 +108,34 @@ func TestCompactCompletedRevisionPlanKeepsWithdrawingPatchStillInUse(t *testing.
 	}
 }
 
+func TestCompactCompletedRevisionPlanRequiresConsistentWithdrawnStatus(t *testing.T) {
+	plan := planWithPatches(withdrawnPatch("p1"))
+	for _, status := range []api.PatchRevisionStatus{
+		{ID: "p1", SelectedReplicas: 1},
+		{ID: "p1", ReadyReplicas: 1},
+		{ID: "p1", AvailableReplicas: 1},
+	} {
+		compacted, removed := CompactCompletedRevisionPlan(plan, &api.MultiPatchRevisionStatus{
+			PatchStatuses: []api.PatchRevisionStatus{status},
+		}, 3)
+		if len(removed) != 0 || len(compacted.ActivePatches) != 1 {
+			t.Fatalf("status %#v compacted withdrawn patch: removed=%v plan=%#v", status, removed, compacted)
+		}
+	}
+}
+
+func TestCompactCompletedRevisionPlanIgnoresAmbiguousDuplicateStatus(t *testing.T) {
+	plan := planWithPatches(withdrawnPatch("p1"))
+	status := &api.MultiPatchRevisionStatus{PatchStatuses: []api.PatchRevisionStatus{
+		{ID: "p1", UpdatedReplicas: 1},
+		{ID: "p1", UpdatedReplicas: 0},
+	}}
+	compacted, removed := CompactCompletedRevisionPlan(plan, status, 3)
+	if len(removed) != 0 || len(compacted.ActivePatches) != 1 {
+		t.Fatalf("duplicate status compacted patch: removed=%v plan=%#v", removed, compacted)
+	}
+}
+
 func TestCompactCompletedRevisionPlanBarrier(t *testing.T) {
 	zero := int32(0)
 	plan := &api.RevisionPlan{Mode: api.RevisionModeConcurrentPatches, ActivePatches: []api.PatchRevision{
@@ -171,23 +200,6 @@ func TestValidateJournalIdentity(t *testing.T) {
 }
 
 func TestValidateRevisionPlan(t *testing.T) {
-	partition := int32(2)
-	validPatch := func(id, source, field string) api.PatchRevision {
-		forward, _ := json.Marshal(PatchDocument{Type: SemanticPatchType, Operations: []Operation{{Path: field, Value: json.RawMessage(`"new"`)}}})
-		reverse, _ := json.Marshal(PatchDocument{Type: SemanticPatchType, Operations: []Operation{{Path: field, Value: json.RawMessage(`"old"`)}}})
-		return api.PatchRevision{
-			ID:                    id,
-			SourceResourceVersion: source,
-			Patch:                 runtime.RawExtension{Raw: forward},
-			ReversePatch:          runtime.RawExtension{Raw: reverse},
-			FieldSet:              []string{field},
-			Rollout: api.PatchRolloutStrategy{
-				Type:        api.PatchRolloutStrategyTypeByPartition,
-				ByPartition: &api.PatchByPartition{Partition: &partition},
-			},
-		}
-	}
-
 	tests := []struct {
 		name    string
 		mutate  func(*api.RevisionPlan)
@@ -259,5 +271,51 @@ func TestValidateRevisionPlan(t *testing.T) {
 				t.Fatalf("ValidateRevisionPlan() error = %v, want containing %q", err, tt.wantErr)
 			}
 		})
+	}
+}
+
+func validPatch(id, source, field string) api.PatchRevision {
+	partition := int32(2)
+	forward, _ := json.Marshal(PatchDocument{Type: SemanticPatchType, Operations: []Operation{{Path: field, Value: json.RawMessage(`"new"`)}}})
+	reverse, _ := json.Marshal(PatchDocument{Type: SemanticPatchType, Operations: []Operation{{Path: field, Value: json.RawMessage(`"old"`)}}})
+	return api.PatchRevision{
+		ID:                    id,
+		SourceResourceVersion: source,
+		Patch:                 runtime.RawExtension{Raw: forward},
+		ReversePatch:          runtime.RawExtension{Raw: reverse},
+		FieldSet:              []string{field},
+		Rollout: api.PatchRolloutStrategy{
+			Type:        api.PatchRolloutStrategyTypeByPartition,
+			ByPartition: &api.PatchByPartition{Partition: &partition},
+		},
+	}
+}
+
+func withdrawnPatch(id string) api.PatchRevision {
+	patch := validPatch(id, "1", ".spec.value")
+	patch.Rollout.TargetState = api.PatchTargetStateAbsent
+	zero := int32(0)
+	patch.Rollout.ByPartition.Partition = &zero
+	return patch
+}
+
+func planWithPatches(patches ...api.PatchRevision) *api.RevisionPlan {
+	return &api.RevisionPlan{Mode: api.RevisionModeConcurrentPatches, ActivePatches: patches}
+}
+
+func TestValidateRevisionPlanRejectsTooManyPatchesAndPausedWithdrawal(t *testing.T) {
+	patches := make([]api.PatchRevision, 0, DefaultMaxActivePatches+1)
+	for i := 0; i <= DefaultMaxActivePatches; i++ {
+		patches = append(patches, validPatch(fmt.Sprintf("p%d", i), fmt.Sprintf("%d", i+1), fmt.Sprintf(".spec.f%d", i)))
+	}
+	if err := ValidateRevisionPlan(&api.RevisionPlan{Mode: api.RevisionModeConcurrentPatches, ActivePatches: patches}); err == nil || !strings.Contains(err.Error(), "exceeds") {
+		t.Fatalf("ValidateRevisionPlan(too many) error = %v, want limit rejection", err)
+	}
+
+	paused := validPatch("p1", "1", ".spec.value")
+	paused.Rollout.TargetState = api.PatchTargetStateAbsent
+	paused.Rollout.Paused = true
+	if err := ValidateRevisionPlan(planWithPatches(paused)); err == nil || !strings.Contains(err.Error(), "Absent") {
+		t.Fatalf("ValidateRevisionPlan(paused withdrawal) error = %v, want rejection", err)
 	}
 }
