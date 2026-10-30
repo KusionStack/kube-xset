@@ -18,6 +18,7 @@ package patches
 
 import (
 	"fmt"
+	"reflect"
 	"sort"
 
 	"k8s.io/apimachinery/pkg/runtime"
@@ -140,7 +141,48 @@ func CompactRevisionPlansForCapture(oldPlan, currentPlan *api.RevisionPlan, stat
 	if len(removed) == 0 {
 		return compactedOld, normalizePlan(currentPlan), nil
 	}
+	// Admission must classify user-owned rollout changes before discarding a
+	// completed journal entry. Otherwise a request that cancels, pauses, or
+	// moves the partition at the completion barrier would be accepted after
+	// silently deleting the very entry needed to apply that transition.
+	if rolloutChangedForRemovedPatches(oldPlan, currentPlan, removed) {
+		return normalizePlan(oldPlan), normalizePlan(currentPlan), nil
+	}
 	return compactedOld, RemoveRevisionPlanPatches(currentPlan, removed), removed
+}
+
+func rolloutChangedForRemovedPatches(oldPlan, currentPlan *api.RevisionPlan, removed []string) bool {
+	if oldPlan == nil || currentPlan == nil {
+		return false
+	}
+	removedSet := make(map[string]struct{}, len(removed))
+	for _, id := range removed {
+		removedSet[id] = struct{}{}
+	}
+	oldRollouts := make(map[string]api.PatchRolloutStrategy, len(removed))
+	for i := range oldPlan.ActivePatches {
+		patch := &oldPlan.ActivePatches[i]
+		if _, ok := removedSet[patch.ID]; ok {
+			oldRollouts[patch.ID] = DefaultRollout(patch.Rollout)
+		}
+	}
+	seen := make(map[string]struct{}, len(removed))
+	for i := range currentPlan.ActivePatches {
+		patch := &currentPlan.ActivePatches[i]
+		oldRollout, ok := oldRollouts[patch.ID]
+		if !ok {
+			continue
+		}
+		if _, duplicate := seen[patch.ID]; duplicate {
+			// Preserve malformed input so normal journal validation can reject it.
+			return true
+		}
+		seen[patch.ID] = struct{}{}
+		if !reflect.DeepEqual(oldRollout, DefaultRollout(patch.Rollout)) {
+			return true
+		}
+	}
+	return false
 }
 
 func allAppliedPatchesAtBarrier(plan *api.RevisionPlan, statusByID map[string]api.PatchRevisionStatus, replicas int32) bool {

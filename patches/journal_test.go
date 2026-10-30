@@ -189,6 +189,90 @@ func TestCompactRevisionPlansForCaptureNormalizesBothSides(t *testing.T) {
 	}
 }
 
+func TestCompactRevisionPlansForCapturePreservesBarrierRolloutChanges(t *testing.T) {
+	zero, one := int32(0), int32(1)
+	basePatch := validPatch("p1", "1", `.spec.value`)
+	basePatch.Rollout.ByPartition.Partition = &zero
+	status := &api.MultiPatchRevisionStatus{PatchStatuses: []api.PatchRevisionStatus{{
+		ID: "p1", SelectedReplicas: 3, UpdatedReplicas: 3, ReadyReplicas: 3, AvailableReplicas: 3,
+	}}}
+
+	tests := []struct {
+		name   string
+		mutate func(*api.PatchRevision)
+	}{
+		{
+			name: "cancel",
+			mutate: func(patch *api.PatchRevision) {
+				patch.Rollout.TargetState = api.PatchTargetStateAbsent
+			},
+		},
+		{
+			name: "move partition backward",
+			mutate: func(patch *api.PatchRevision) {
+				patch.Rollout.ByPartition.Partition = &one
+			},
+		},
+		{
+			name: "pause",
+			mutate: func(patch *api.PatchRevision) {
+				patch.Rollout.Paused = true
+			},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			oldPlan := planWithPatches(basePatch)
+			currentPlan := normalizePlan(oldPlan)
+			tt.mutate(&currentPlan.ActivePatches[0])
+
+			oldResult, currentResult, removed := CompactRevisionPlansForCapture(oldPlan, currentPlan, status, 3)
+			if len(removed) != 0 {
+				t.Fatalf("removed = %#v, want rollout change to take precedence over compaction", removed)
+			}
+			if len(oldResult.ActivePatches) != 1 || len(currentResult.ActivePatches) != 1 {
+				t.Fatalf("active patches old=%#v current=%#v, want p1 preserved", oldResult.ActivePatches, currentResult.ActivePatches)
+			}
+		})
+	}
+}
+
+func TestCompactThenCaptureBarrierCancellationAppliesReversePatch(t *testing.T) {
+	zero := int32(0)
+	oldPlan := planWithPatches(validPatch("p1", "1", `.spec.value`))
+	oldPlan.ActivePatches[0].Rollout.ByPartition.Partition = &zero
+	currentPlan := normalizePlan(oldPlan)
+	currentPlan.ActivePatches[0].Rollout.TargetState = api.PatchTargetStateAbsent
+	status := &api.MultiPatchRevisionStatus{PatchStatuses: []api.PatchRevisionStatus{{
+		ID: "p1", SelectedReplicas: 3, UpdatedReplicas: 3, ReadyReplicas: 3, AvailableReplicas: 3,
+	}}}
+
+	compactedOld, compactedCurrent, removed := CompactRevisionPlansForCapture(oldPlan, currentPlan, status, 3)
+	if len(removed) != 0 {
+		t.Fatalf("removed = %#v, want cancellation preserved for CaptureUpdate", removed)
+	}
+	result, err := CaptureUpdate(
+		[]byte(`{"spec":{"value":"new"}}`),
+		[]byte(`{"spec":{"value":"new"}}`),
+		compactedOld,
+		compactedCurrent,
+		CaptureOptions{SourceResourceVersion: "2", Replicas: 3, OldReplicas: 3},
+	)
+	if err != nil {
+		t.Fatalf("CaptureUpdate() error = %v", err)
+	}
+	if !result.Canceled || result.PatchID != "p1" {
+		t.Fatalf("CaptureUpdate() canceled=%v patchID=%q, want true and p1", result.Canceled, result.PatchID)
+	}
+	if got, want := string(result.Template), `{"spec":{"value":"old"}}`; got != want {
+		t.Fatalf("CaptureUpdate() template = %s, want %s", got, want)
+	}
+	if got := DefaultRollout(result.Plan.ActivePatches[0].Rollout).TargetState; got != api.PatchTargetStateAbsent {
+		t.Fatalf("targetState = %q, want %q", got, api.PatchTargetStateAbsent)
+	}
+}
+
 func TestValidateJournalIdentity(t *testing.T) {
 	plan := &api.RevisionPlan{ActivePatches: []api.PatchRevision{
 		{ID: "p1", SourceResourceVersion: "10"},

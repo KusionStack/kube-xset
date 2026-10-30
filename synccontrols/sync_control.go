@@ -540,8 +540,17 @@ func (r *RealSyncControl) Scale(ctx context.Context, xsetObject api.XSetObject, 
 						}
 					}
 				}
+				// Legacy rollout recovery intentionally advances an unrecoverable
+				// JustCreate/RecreateUpdate attempt to UpdatedRevision, even when
+				// the failed create used an older context revision. Concurrent patch
+				// mode instead has one desired combination revision per identity, so
+				// recovery must retain that identity-specific target revision.
+				recoveryRevision := syncContext.UpdatedRevision
+				if syncContext.MultiPatch != nil {
+					recoveryRevision = revision
+				}
 				defer func() {
-					if r.resourceContextControl.DecideContextRevisionAfterCreate(availableIDContext, revision, err) {
+					if r.resourceContextControl.DecideContextRevisionAfterCreate(availableIDContext, recoveryRevision, err) {
 						needUpdateContext.Store(true)
 					}
 				}()
@@ -882,7 +891,21 @@ func (r *RealSyncControl) Update(ctx context.Context, xsetObject api.XSetObject,
 		var msg string
 		var err error
 
-		if !targetToUpdateSet.Has(targetInfo.GetName()) {
+		if !targetToUpdateSet.Has(targetInfo.GetName()) && targetInfo.IsAllowUpdateOps && targetInfo.IsUpdatedRevision {
+			// The execution candidate set intentionally excludes targets that
+			// already reached their desired concurrent-patch combination. An
+			// already-started lifecycle still needs its normal readiness check and
+			// graceful finish, independent of whether another update is required.
+			if updateFinished, msg, err = updater.GetTargetUpdateFinishStatus(ctx, targetInfo); err != nil {
+				return fmt.Errorf("failed to get target %s/%s update finished: %w", targetInfo.GetNamespace(), targetInfo.GetName(), err)
+			} else if !updateFinished {
+				r.Recorder.Eventf(targetInfo.Object,
+					corev1.EventTypeNormal,
+					"WaitingUpdateReady",
+					"waiting for target %s/%s to update finished: %s",
+					targetInfo.GetNamespace(), targetInfo.GetName(), msg)
+			}
+		} else if !targetToUpdateSet.Has(targetInfo.GetName()) {
 			// target is out of scope (partition or by label) and not start update yet, finish update by cancel
 			finishByCancelUpdate = !targetInfo.IsAllowUpdateOps
 			logger.Info("out of update scope", "target", ObjectKeyString(targetInfo.Object), "finishByCancelUpdate", finishByCancelUpdate)
