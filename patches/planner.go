@@ -266,7 +266,10 @@ func applyLabelCommands(instance InstanceState, patchByID map[string]*api.PatchR
 		switch command {
 		case CommandApply:
 			if rollout.TargetState == api.PatchTargetStateAbsent {
-				return nil, fmt.Errorf("instance %d cannot apply patch %q in Absent state", instance.ID, patchID)
+				// Withdrawal wins over stale ByLabel commands. Snapshot the
+				// command so sync can consume it without re-applying the patch.
+				delete(desiredSet, patchID)
+				break
 			}
 			desiredSet[patchID] = struct{}{}
 		case CommandRemove:

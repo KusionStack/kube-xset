@@ -81,12 +81,12 @@ func CaptureUpdate(oldTemplate, currentTemplate []byte, oldPlan, currentPlan *ap
 	// newly allocated identities could join an older patch on the next plan.
 	applyScaleOutPolicy(resultPlan, options.OldReplicas, options.Replicas)
 
-	changedTarget, err := findTargetStateTransition(oldPlan, resultPlan)
+	changedTargets, err := findTargetStateTransitions(oldPlan, resultPlan)
 	if err != nil {
 		return nil, err
 	}
-	if changedTarget != nil {
-		return captureExplicitTargetTransition(oldTemplate, currentTemplate, resultPlan, changedTarget)
+	if len(changedTargets) != 0 {
+		return captureExplicitTargetTransitions(oldTemplate, currentTemplate, resultPlan, changedTargets)
 	}
 
 	forward, reverse, fieldSet, err := BuildPatchPair(oldTemplate, currentTemplate, options.Schema)
@@ -209,7 +209,14 @@ func mergeOwnedJournal(oldPlan, currentPlan *api.RevisionPlan, source, patchID s
 		oldPatch := oldPlan.ActivePatches[i]
 		currentPatch, exists := currentByID[oldPatch.ID]
 		if !exists {
-			return nil, fmt.Errorf("system-owned patch %q cannot be removed", oldPatch.ID)
+			// Removing a journal entry is a user-facing request to withdraw the
+			// patch, not permission to erase controller-owned history. Reinsert
+			// it as Absent until every instance and command has converged.
+			if DefaultRollout(oldPatch.Rollout).TargetState == api.PatchTargetStateApplied {
+				markWithdrawing(&oldPatch)
+			}
+			journal = append(journal, oldPatch)
+			continue
 		}
 		if !sameSystemFields(oldPatch, currentPatch) {
 			return nil, fmt.Errorf("system-owned fields of patch %q cannot be modified", oldPatch.ID)
@@ -241,12 +248,12 @@ func sameSystemFields(left, right api.PatchRevision) bool {
 		reflect.DeepEqual(left.FieldSet, right.FieldSet)
 }
 
-func findTargetStateTransition(oldPlan, currentPlan *api.RevisionPlan) (*api.PatchRevision, error) {
+func findTargetStateTransitions(oldPlan, currentPlan *api.RevisionPlan) ([]*api.PatchRevision, error) {
 	oldByID := make(map[string]api.PatchRevision, len(oldPlan.ActivePatches))
 	for i := range oldPlan.ActivePatches {
 		oldByID[oldPlan.ActivePatches[i].ID] = oldPlan.ActivePatches[i]
 	}
-	var changed *api.PatchRevision
+	changed := make([]*api.PatchRevision, 0)
 	for i := range currentPlan.ActivePatches {
 		patch := &currentPlan.ActivePatches[i]
 		oldPatch, exists := oldByID[patch.ID]
@@ -258,33 +265,43 @@ func findTargetStateTransition(oldPlan, currentPlan *api.RevisionPlan) (*api.Pat
 		if oldTarget == newTarget {
 			continue
 		}
-		if changed != nil {
-			return nil, fmt.Errorf("one update may change targetState for only one patch")
-		}
 		if oldTarget == api.PatchTargetStateAbsent || newTarget != api.PatchTargetStateAbsent {
 			return nil, fmt.Errorf("patch %q cannot transition from %q to %q", patch.ID, oldTarget, newTarget)
 		}
-		changed = patch
+		changed = append(changed, patch)
 	}
+	sort.Slice(changed, func(i, j int) bool { return changed[i].ID < changed[j].ID })
 	return changed, nil
 }
 
-func captureExplicitTargetTransition(oldTemplate, currentTemplate []byte, plan *api.RevisionPlan, patch *api.PatchRevision) (*CaptureResult, error) {
-	expected, err := Apply(oldTemplate, patch.ReversePatch)
-	if err != nil {
-		return nil, fmt.Errorf("apply reverse patch %q: %w", patch.ID, err)
+func captureExplicitTargetTransitions(oldTemplate, currentTemplate []byte, plan *api.RevisionPlan, changed []*api.PatchRevision) (*CaptureResult, error) {
+	expected := append([]byte(nil), oldTemplate...)
+	ids := make([]string, 0, len(changed))
+	for _, patch := range changed {
+		var err error
+		expected, err = Apply(expected, patch.ReversePatch)
+		if err != nil {
+			return nil, fmt.Errorf("apply reverse patch %q: %w", patch.ID, err)
+		}
+		ids = append(ids, patch.ID)
 	}
 	if !jsonEqual(currentTemplate, oldTemplate) && !jsonEqual(currentTemplate, expected) {
-		return nil, fmt.Errorf("targetState transition for patch %q conflicts with unrelated template changes", patch.ID)
+		return nil, fmt.Errorf("targetState transitions for patches %v conflict with unrelated template changes", ids)
 	}
-	markWithdrawing(patch)
+	for _, patch := range changed {
+		markWithdrawing(patch)
+	}
 	if err := ValidateRevisionPlan(plan); err != nil {
 		return nil, err
+	}
+	patchID := ""
+	if len(changed) == 1 {
+		patchID = changed[0].ID
 	}
 	return &CaptureResult{
 		Template: expected,
 		Plan:     plan,
-		PatchID:  patch.ID,
+		PatchID:  patchID,
 		Canceled: true,
 	}, nil
 }

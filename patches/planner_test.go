@@ -130,7 +130,7 @@ func TestPlanInstancesCommandSnapshotDoesNotClearNewerValue(t *testing.T) {
 	}
 }
 
-func TestPlanInstancesRejectsUnknownWithdrawingAndLegacyCommands(t *testing.T) {
+func TestPlanInstancesRejectsUnknownInvalidAndLegacyCommands(t *testing.T) {
 	plan := &api.RevisionPlan{Mode: api.RevisionModeConcurrentPatches, ActivePatches: []api.PatchRevision{
 		{ID: "withdrawing", Rollout: labelRollout(api.PatchTargetStateAbsent, api.PatchNewInstancePolicyApply)},
 	}}
@@ -140,7 +140,6 @@ func TestPlanInstancesRejectsUnknownWithdrawingAndLegacyCommands(t *testing.T) {
 		want   string
 	}{
 		{name: "unknown patch", labels: map[string]string{"aseset.alipay.com/update-missing": CommandApply}, want: "unknown patch"},
-		{name: "withdrawing apply", labels: map[string]string{"aseset.alipay.com/update-withdrawing": CommandApply}, want: "Absent"},
 		{name: "legacy command", labels: map[string]string{"aseset.alipay.com/update-included": "true"}, want: "legacy"},
 		{name: "invalid value", labels: map[string]string{"aseset.alipay.com/update-withdrawing": "yes"}, want: "unsupported command"},
 	}
@@ -154,6 +153,27 @@ func TestPlanInstancesRejectsUnknownWithdrawingAndLegacyCommands(t *testing.T) {
 				t.Fatalf("PlanInstances() error = %v, want containing %q", err, tt.want)
 			}
 		})
+	}
+}
+
+func TestPlanInstancesConsumesCommandsForAbsentPatchWithoutChangingMembership(t *testing.T) {
+	plan := &api.RevisionPlan{Mode: api.RevisionModeConcurrentPatches, ActivePatches: []api.PatchRevision{
+		{ID: "withdrawing", Rollout: labelRollout(api.PatchTargetStateAbsent, api.PatchNewInstancePolicyApply)},
+	}}
+	instances := []InstanceState{
+		{ID: 1, AppliedPatchIDs: []string{"withdrawing"}, Labels: map[string]string{"patch/withdrawing": CommandApply}},
+		{ID: 2, AppliedPatchIDs: []string{"withdrawing"}, Labels: map[string]string{"patch/withdrawing": CommandRemove}},
+	}
+
+	planned, err := PlanInstances(plan, instances, PlanOptions{CommandLabelPrefix: "patch/"})
+	if err != nil {
+		t.Fatalf("PlanInstances() error = %v", err)
+	}
+	assertDesiredVectors(t, planned, map[int][]string{1: {}, 2: {}})
+	for i := range planned {
+		if got := planned[i].CommandSnapshot["patch/withdrawing"]; got == "" {
+			t.Fatalf("instance %d command snapshot = %#v, want stale command consumed", planned[i].ID, planned[i].CommandSnapshot)
+		}
 	}
 }
 

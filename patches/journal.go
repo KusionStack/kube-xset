@@ -182,6 +182,17 @@ func rolloutChangedForRemovedPatches(oldPlan, currentPlan *api.RevisionPlan, rem
 			return true
 		}
 	}
+	for id, oldRollout := range oldRollouts {
+		if _, present := seen[id]; present {
+			continue
+		}
+		// Omitting an Applied entry is the direct-delete withdrawal request.
+		// Preserve both sides so CaptureUpdate can reinsert it as Absent. A
+		// completed Absent entry may still be physically compacted.
+		if oldRollout.TargetState == api.PatchTargetStateApplied {
+			return true
+		}
+	}
 	return false
 }
 

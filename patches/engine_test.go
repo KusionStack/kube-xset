@@ -639,6 +639,130 @@ func TestCaptureUpdateRejectsSystemOwnedJournalMutation(t *testing.T) {
 	}
 }
 
+func TestCaptureUpdateRemovedEntryWithdrawsPatchAndReversesTemplate(t *testing.T) {
+	r0 := []byte(`{"spec":{"runtime":{"artifact":"v1","templateId":"t1"}}}`)
+	r1 := []byte(`{"spec":{"runtime":{"artifact":"v2","templateId":"t1"}}}`)
+	plan := &api.RevisionPlan{Mode: api.RevisionModeConcurrentPatches}
+	captured, err := CaptureUpdate(r0, r1, plan, plan, CaptureOptions{SourceResourceVersion: "10", Replicas: 3})
+	if err != nil {
+		t.Fatalf("initial CaptureUpdate() error = %v", err)
+	}
+
+	deleteRequest := deepCopyPlan(captured.Plan)
+	deleteRequest.ActivePatches = nil
+	result, err := CaptureUpdate(r1, r1, captured.Plan, deleteRequest, CaptureOptions{SourceResourceVersion: "11", Replicas: 3})
+	if err != nil {
+		t.Fatalf("delete CaptureUpdate() error = %v", err)
+	}
+	assertJSONEqual(t, result.Template, r0)
+	if !result.Canceled || result.PatchID != captured.Plan.ActivePatches[0].ID {
+		t.Fatalf("delete result canceled=%v patchID=%q, want true and %q", result.Canceled, result.PatchID, captured.Plan.ActivePatches[0].ID)
+	}
+	if len(result.Plan.ActivePatches) != 1 {
+		t.Fatalf("active patches = %#v, want deleted entry retained while withdrawing", result.Plan.ActivePatches)
+	}
+	patch := result.Plan.ActivePatches[0]
+	if patch.Rollout.TargetState != api.PatchTargetStateAbsent {
+		t.Fatalf("targetState = %q, want Absent", patch.Rollout.TargetState)
+	}
+	if patch.Rollout.ByPartition == nil || patch.Rollout.ByPartition.Partition == nil || *patch.Rollout.ByPartition.Partition != 0 {
+		t.Fatalf("withdrawal partition = %#v, want 0", patch.Rollout.ByPartition)
+	}
+}
+
+func TestCaptureUpdateRemovedEntryAcceptsAlreadyReversedTemplate(t *testing.T) {
+	r0 := []byte(`{"spec":{"value":"old"}}`)
+	r1 := []byte(`{"spec":{"value":"new"}}`)
+	plan := &api.RevisionPlan{Mode: api.RevisionModeConcurrentPatches}
+	captured, err := CaptureUpdate(r0, r1, plan, plan, CaptureOptions{SourceResourceVersion: "10", Replicas: 1})
+	if err != nil {
+		t.Fatalf("initial CaptureUpdate() error = %v", err)
+	}
+	deleteRequest := deepCopyPlan(captured.Plan)
+	deleteRequest.ActivePatches = nil
+
+	result, err := CaptureUpdate(r1, r0, captured.Plan, deleteRequest, CaptureOptions{SourceResourceVersion: "11", Replicas: 1})
+	if err != nil {
+		t.Fatalf("delete with reversed template error = %v", err)
+	}
+	assertJSONEqual(t, result.Template, r0)
+}
+
+func TestCaptureUpdateRemovedEntriesWithdrawAtomically(t *testing.T) {
+	r0 := []byte(`{"spec":{"a":"a0","b":"b0","keep":"same"}}`)
+	r1 := []byte(`{"spec":{"a":"a1","b":"b0","keep":"same"}}`)
+	r2 := []byte(`{"spec":{"a":"a1","b":"b1","keep":"same"}}`)
+	plan := &api.RevisionPlan{Mode: api.RevisionModeConcurrentPatches}
+	first, err := CaptureUpdate(r0, r1, plan, plan, CaptureOptions{SourceResourceVersion: "10", Replicas: 2})
+	if err != nil {
+		t.Fatalf("first CaptureUpdate() error = %v", err)
+	}
+	second, err := CaptureUpdate(r1, r2, first.Plan, first.Plan, CaptureOptions{SourceResourceVersion: "11", Replicas: 2})
+	if err != nil {
+		t.Fatalf("second CaptureUpdate() error = %v", err)
+	}
+	deleteRequest := deepCopyPlan(second.Plan)
+	deleteRequest.ActivePatches = nil
+
+	result, err := CaptureUpdate(r2, r2, second.Plan, deleteRequest, CaptureOptions{SourceResourceVersion: "12", Replicas: 2})
+	if err != nil {
+		t.Fatalf("batch delete CaptureUpdate() error = %v", err)
+	}
+	assertJSONEqual(t, result.Template, r0)
+	if len(result.Plan.ActivePatches) != 2 {
+		t.Fatalf("active patches = %#v, want both withdrawing entries", result.Plan.ActivePatches)
+	}
+	for i := range result.Plan.ActivePatches {
+		if result.Plan.ActivePatches[i].Rollout.TargetState != api.PatchTargetStateAbsent {
+			t.Fatalf("patch %q targetState = %q, want Absent", result.Plan.ActivePatches[i].ID, result.Plan.ActivePatches[i].Rollout.TargetState)
+		}
+	}
+}
+
+func TestCaptureUpdateRemovedEntryRejectsUnrelatedTemplateChange(t *testing.T) {
+	r0 := []byte(`{"spec":{"value":"old","other":"same"}}`)
+	r1 := []byte(`{"spec":{"value":"new","other":"same"}}`)
+	unrelated := []byte(`{"spec":{"value":"new","other":"changed"}}`)
+	plan := &api.RevisionPlan{Mode: api.RevisionModeConcurrentPatches}
+	captured, err := CaptureUpdate(r0, r1, plan, plan, CaptureOptions{SourceResourceVersion: "10", Replicas: 1})
+	if err != nil {
+		t.Fatalf("initial CaptureUpdate() error = %v", err)
+	}
+	deleteRequest := deepCopyPlan(captured.Plan)
+	deleteRequest.ActivePatches = nil
+
+	_, err = CaptureUpdate(r1, unrelated, captured.Plan, deleteRequest, CaptureOptions{SourceResourceVersion: "11", Replicas: 1})
+	if err == nil || !strings.Contains(err.Error(), "unrelated template") {
+		t.Fatalf("delete with unrelated template error = %v, want rejection", err)
+	}
+}
+
+func TestCaptureUpdateRemovingAbsentEntryIsIdempotent(t *testing.T) {
+	r0 := []byte(`{"spec":{"value":"old"}}`)
+	r1 := []byte(`{"spec":{"value":"new"}}`)
+	plan := &api.RevisionPlan{Mode: api.RevisionModeConcurrentPatches}
+	captured, err := CaptureUpdate(r0, r1, plan, plan, CaptureOptions{SourceResourceVersion: "10", Replicas: 1})
+	if err != nil {
+		t.Fatalf("initial CaptureUpdate() error = %v", err)
+	}
+	withdrawing := deepCopyPlan(captured.Plan)
+	markWithdrawing(&withdrawing.ActivePatches[0])
+	deleteRequest := deepCopyPlan(withdrawing)
+	deleteRequest.ActivePatches = nil
+
+	result, err := CaptureUpdate(r0, r0, withdrawing, deleteRequest, CaptureOptions{SourceResourceVersion: "11", Replicas: 1})
+	if err != nil {
+		t.Fatalf("idempotent delete CaptureUpdate() error = %v", err)
+	}
+	assertJSONEqual(t, result.Template, r0)
+	if result.Canceled || result.PatchID != "" {
+		t.Fatalf("idempotent delete was classified as a new cancellation: %#v", result)
+	}
+	if len(result.Plan.ActivePatches) != 1 || result.Plan.ActivePatches[0].Rollout.TargetState != api.PatchTargetStateAbsent {
+		t.Fatalf("withdrawing entry was not retained: %#v", result.Plan.ActivePatches)
+	}
+}
+
 func TestCaptureUpdateAllowsRolloutOnlyMutation(t *testing.T) {
 	r0 := []byte(`{"spec":{"runtime":{"artifact":"v1"}}}`)
 	r1 := []byte(`{"spec":{"runtime":{"artifact":"v2"}}}`)

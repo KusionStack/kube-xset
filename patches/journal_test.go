@@ -238,6 +238,27 @@ func TestCompactRevisionPlansForCapturePreservesBarrierRolloutChanges(t *testing
 	}
 }
 
+func TestCompactRevisionPlansForCapturePreservesBarrierDeletionIntent(t *testing.T) {
+	zero := int32(0)
+	oldPlan := planWithPatches(validPatch("p1", "1", `.spec.value`))
+	oldPlan.ActivePatches[0].Rollout.ByPartition.Partition = &zero
+	currentPlan := &api.RevisionPlan{Mode: api.RevisionModeConcurrentPatches}
+	status := &api.MultiPatchRevisionStatus{PatchStatuses: []api.PatchRevisionStatus{{
+		ID: "p1", SelectedReplicas: 3, UpdatedReplicas: 3, ReadyReplicas: 3, AvailableReplicas: 3,
+	}}}
+
+	oldResult, currentResult, removed := CompactRevisionPlansForCapture(oldPlan, currentPlan, status, 3)
+	if len(removed) != 0 {
+		t.Fatalf("removed = %#v, want deletion intent to take precedence over compaction", removed)
+	}
+	if len(oldResult.ActivePatches) != 1 {
+		t.Fatalf("old active patches = %#v, want p1 preserved", oldResult.ActivePatches)
+	}
+	if len(currentResult.ActivePatches) != 0 {
+		t.Fatalf("current active patches = %#v, want missing p1 preserved as deletion intent", currentResult.ActivePatches)
+	}
+}
+
 func TestCompactThenCaptureBarrierCancellationAppliesReversePatch(t *testing.T) {
 	zero := int32(0)
 	oldPlan := planWithPatches(validPatch("p1", "1", `.spec.value`))
