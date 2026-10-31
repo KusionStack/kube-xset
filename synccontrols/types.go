@@ -43,6 +43,7 @@ type SyncContext struct {
 	OwnedIds   map[int]*api.ContextDetail
 
 	SubResources
+	MultiPatch *MultiPatchSyncContext
 
 	NewStatus *api.XSetStatus
 }
@@ -80,6 +81,7 @@ type DecorationInfo struct {
 
 type TargetUpdateInfo struct {
 	*TargetWrapper
+	multiPatchIntent *replacementPatchIntent
 
 	UpdatedTarget client.Object
 
@@ -92,6 +94,10 @@ type TargetUpdateInfo struct {
 	CurrentRevision *appsv1.ControllerRevision
 	// carry the desired update revision
 	UpdateRevision *appsv1.ControllerRevision
+	// CommandSnapshot contains Patch-scoped ByLabel commands observed while
+	// planning this update. Values are removed only with JSON Patch test
+	// preconditions, so a newer command cannot be consumed accidentally.
+	CommandSnapshot map[string]string
 
 	SubResourcesChanged
 

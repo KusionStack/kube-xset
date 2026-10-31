@@ -221,7 +221,7 @@ func (r *RealSyncControl) replaceOriginTargets(
 	return successCount, err
 }
 
-func (r *RealSyncControl) dealReplaceTargets(ctx context.Context, targets []*TargetWrapper) (
+func (r *RealSyncControl) dealReplaceTargets(ctx context.Context, targets []*TargetWrapper, multiPatch *MultiPatchSyncContext) (
 	needReplaceTargets []*TargetWrapper, needCleanLabelTargets []client.Object, targetNeedCleanLabels [][]string, needDeleteTargets []client.Object,
 ) {
 	logger := logr.FromContext(ctx)
@@ -283,7 +283,13 @@ func (r *RealSyncControl) dealReplaceTargets(ctx context.Context, targets []*Tar
 				}
 			} else if !replaceByUpdate {
 				// not replace update, delete origin target when new created target is service available
-				if r.xsetController.CheckAvailable(target) {
+				matchesDesired := true
+				if multiPatch != nil {
+					desired := multiPatch.DesiredRevisions[originTarget.ID]
+					_, deleting := r.xsetLabelAnnoMgr.Get(target, api.XDeletionIndicationLabelKey)
+					matchesDesired = desired != nil && IsTargetUpdatedRevision(target, desired.Name) && target.GetDeletionTimestamp() == nil && !deleting
+				}
+				if matchesDesired && r.xsetController.CheckAvailable(target) {
 					needDeleteTargets = append(needDeleteTargets, originTarget.Object)
 				}
 			}
@@ -311,6 +317,11 @@ func updateReplaceOriginTarget(
 	originTargetUpdateInfo, newTargetUpdateInfo *TargetUpdateInfo,
 ) error {
 	originTarget := originTargetUpdateInfo.Object
+	// Persist the logical vector before deleting a peer and its ByLabel
+	// commands. A crash between these writes must not lose the new target.
+	if err := persistReplaceOriginTarget(ctx, c, recorder, xsetLabelAnnoMgr, originTargetUpdateInfo); err != nil {
+		return err
+	}
 
 	// 1. delete the new target if not updated
 	if newTargetUpdateInfo != nil {
@@ -334,12 +345,35 @@ func updateReplaceOriginTarget(
 		}
 	}
 
-	// 2. replace the origin target with updated target
+	return nil
+}
+
+func persistReplaceOriginTarget(ctx context.Context, c client.Client, recorder record.EventRecorder, xsetLabelAnnoMgr api.XSetLabelAnnotationManager, originTargetUpdateInfo *TargetUpdateInfo) error {
+	originTarget := originTargetUpdateInfo.Object
+	var intentRaw []byte
+	if originTargetUpdateInfo.multiPatchIntent != nil {
+		var err error
+		intentRaw, err = json.Marshal(originTargetUpdateInfo.multiPatchIntent)
+		if err != nil {
+			return err
+		}
+	}
 	_, replaceIndicate := xsetLabelAnnoMgr.Get(originTarget, api.XReplaceIndicationLabelKey)
 	replaceRevision, replaceByUpdate := xsetLabelAnnoMgr.Get(originTarget, api.XReplaceByReplaceUpdateLabelKey)
-	if !replaceIndicate || !replaceByUpdate || replaceRevision != originTargetUpdateInfo.UpdateRevision.Name {
+	intentChanged := intentRaw != nil && string(intentRaw) != originTarget.GetAnnotations()[replacementPatchIntentAnnotation]
+	if !replaceIndicate || !replaceByUpdate || replaceRevision != originTargetUpdateInfo.UpdateRevision.Name || intentChanged {
 		now := time.Now().UnixNano()
-		patch := client.RawPatch(types.MergePatchType, []byte(fmt.Sprintf(`{"metadata":{"labels":{%q:"%v", %q: "%v"}}}`, xsetLabelAnnoMgr.Value(api.XReplaceIndicationLabelKey), now, xsetLabelAnnoMgr.Value(api.XReplaceByReplaceUpdateLabelKey), originTargetUpdateInfo.UpdateRevision.Name)))
+		metadata := map[string]interface{}{"labels": map[string]string{xsetLabelAnnoMgr.Value(api.XReplaceIndicationLabelKey): strconv.FormatInt(now, 10), xsetLabelAnnoMgr.Value(api.XReplaceByReplaceUpdateLabelKey): originTargetUpdateInfo.UpdateRevision.Name}}
+		if intentRaw != nil {
+			metadata["annotations"] = map[string]string{replacementPatchIntentAnnotation: string(intentRaw)}
+			metadata["resourceVersion"] = originTarget.GetResourceVersion()
+			metadata["uid"] = originTarget.GetUID()
+		}
+		raw, err := json.Marshal(map[string]interface{}{"metadata": metadata})
+		if err != nil {
+			return err
+		}
+		patch := client.RawPatch(types.MergePatchType, raw)
 		if err := c.Patch(ctx, originTarget, patch); err != nil {
 			return fmt.Errorf("fail to label origin target %s/%s with replace indicate label by replaceUpdate: %w", originTarget.GetNamespace(), originTarget.GetName(), err)
 		}
@@ -357,6 +391,13 @@ func updateReplaceOriginTarget(
 
 // getReplaceRevision finds replaceNewTarget's revision from originTarget
 func (r *RealSyncControl) getReplaceRevision(originTarget client.Object, syncContext *SyncContext) *appsv1.ControllerRevision {
+	if syncContext.MultiPatch != nil {
+		if id, err := xcontrol.GetInstanceID(r.xsetLabelAnnoMgr, originTarget); err == nil {
+			if desired := syncContext.MultiPatch.DesiredRevisions[id]; desired != nil {
+				return desired
+			}
+		}
+	}
 	// replace update, first find revision from label, if revision not found, just replace with updated revision
 	if updateRevisionName, exist := r.xsetLabelAnnoMgr.Get(originTarget, api.XReplaceByReplaceUpdateLabelKey); exist {
 		for _, rv := range syncContext.Revisions {

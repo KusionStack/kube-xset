@@ -24,6 +24,10 @@ import (
 const (
 	// ReclaimScaleStrategy enables reclaim of xset.spec.scaleStrategy.targetToDelete
 	ReclaimScaleStrategy featuregate.Feature = "ReclaimScaleStrategy"
+	// ConcurrentPatchRollout enables independently planned patch revisions. It
+	// defaults on for compatibility with objects that already use the mode, and
+	// can be disabled as an emergency freeze without changing their journal.
+	ConcurrentPatchRollout featuregate.Feature = "ConcurrentPatchRollout"
 )
 
 func init() {
@@ -34,5 +38,6 @@ func init() {
 // To add a new feature, define a key for it above and add it here. The features will be
 // available throughout Kubernetes binaries.
 var defaultKubernetesFeatureGates = map[featuregate.Feature]featuregate.FeatureSpec{
-	ReclaimScaleStrategy: {Default: false, PreRelease: featuregate.Alpha},
+	ReclaimScaleStrategy:   {Default: false, PreRelease: featuregate.Alpha},
+	ConcurrentPatchRollout: {Default: true, PreRelease: featuregate.Beta},
 }

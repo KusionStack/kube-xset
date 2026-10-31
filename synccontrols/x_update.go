@@ -49,18 +49,28 @@ func (r *RealSyncControl) attachTargetUpdateInfo(_ context.Context, xsetObject a
 	targetUpdateInfoList := make([]*TargetUpdateInfo, len(activeTargets))
 
 	for i, target := range activeTargets {
+		desiredRevision := syncContext.UpdatedRevision
+		if syncContext.MultiPatch != nil {
+			if revision := syncContext.MultiPatch.DesiredRevisions[target.ID]; revision != nil {
+				desiredRevision = revision
+			}
+		}
 		updateInfo := &TargetUpdateInfo{
-			TargetWrapper: syncContext.TargetWrappers[i],
+			TargetWrapper:  target,
+			UpdateRevision: desiredRevision,
+		}
+		if syncContext.MultiPatch != nil {
+			updateInfo.CommandSnapshot = syncContext.MultiPatch.InstancePlans[target.ID].CommandSnapshot
+			updateInfo.multiPatchIntent = &replacementPatchIntent{Version: 1, OwnerUID: string(xsetObject.GetUID()), Revision: desiredRevision.Name, PatchIDs: append([]string{}, syncContext.MultiPatch.InstancePlans[target.ID].DesiredPatchIDs...)}
 		}
 
-		updateInfo.UpdateRevision = syncContext.UpdatedRevision
 		// decide this target current revision, or nil if not indicated
 		if target.GetLabels() != nil {
 			currentRevisionName, exist := target.GetLabels()[appsv1.ControllerRevisionHashLabelKey]
 			if exist {
-				if currentRevisionName == syncContext.UpdatedRevision.GetName() {
+				if currentRevisionName == desiredRevision.GetName() {
 					updateInfo.IsUpdatedRevision = true
-					updateInfo.CurrentRevision = syncContext.UpdatedRevision
+					updateInfo.CurrentRevision = desiredRevision
 				} else {
 					updateInfo.IsUpdatedRevision = false
 					for _, rv := range syncContext.Revisions {
@@ -136,12 +146,18 @@ func (r *RealSyncControl) attachTargetUpdateInfo(_ context.Context, xsetObject a
 		if !target.PlaceHolder {
 			continue
 		}
+		desiredRevision := syncContext.UpdatedRevision
+		if syncContext.MultiPatch != nil {
+			if revision := syncContext.MultiPatch.DesiredRevisions[target.ID]; revision != nil {
+				desiredRevision = revision
+			}
+		}
 		updateInfo := &TargetUpdateInfo{
 			TargetWrapper:  target,
-			UpdateRevision: syncContext.UpdatedRevision,
+			UpdateRevision: desiredRevision,
 		}
 		if revision, exist := r.resourceContextControl.Get(target.ContextDetail, api.EnumRevisionContextDataKey); exist &&
-			revision == syncContext.UpdatedRevision.GetName() {
+			revision == desiredRevision.GetName() {
 			updateInfo.IsUpdatedRevision = true
 		}
 		targetUpdateInfoList = append(targetUpdateInfoList, updateInfo)
@@ -164,6 +180,18 @@ func filterOutPlaceHolderUpdateInfos(targets []*TargetUpdateInfo) []*TargetUpdat
 func (r *RealSyncControl) decideTargetToUpdate(xsetController api.XSetController, xset api.XSetObject, targetInfos []*TargetUpdateInfo) []*TargetUpdateInfo {
 	spec := xsetController.GetXSetSpec(xset)
 	filteredPodInfos := r.getTargetsUpdateTargets(targetInfos)
+	if operation, enabled := xsetController.(api.MultiPatchXSetOperation); enabled {
+		plan := operation.GetRevisionPlan(xset)
+		if plan != nil && plan.Mode == api.RevisionModeConcurrentPatches {
+			var targets []*TargetUpdateInfo
+			for _, targetInfo := range filteredPodInfos {
+				if !targetInfo.IsUpdatedRevision || targetInfo.DecorationChanged || targetInfo.PvcTmpHashChanged {
+					targets = append(targets, targetInfo)
+				}
+			}
+			return targets
+		}
+	}
 
 	if spec.UpdateStrategy.RollingUpdate != nil && spec.UpdateStrategy.RollingUpdate.ByLabel != nil {
 		activeTargetInfos := filterOutPlaceHolderUpdateInfos(filteredPodInfos)
@@ -569,7 +597,7 @@ func (u *replaceUpdateTargetUpdater) BeginUpdateTarget(ctx context.Context, sync
 				replacePairNewTarget.GetNamespace(),
 				replacePairNewTarget.GetName(),
 				newTargetRevision,
-				syncContext.UpdatedRevision.GetName())
+				targetInfo.UpdateRevision.GetName())
 			patch := client.RawPatch(types.MergePatchType, []byte(fmt.Sprintf(`{"metadata":{"labels":{%q:"%d"}}}`, u.XsetLabelAnnoMgr.Value(api.XDeletionIndicationLabelKey), time.Now().UnixNano())))
 			if patchErr := u.Client.Patch(ctx, targetInfo.ReplacePairNewTargetInfo.Object, patch); patchErr != nil {
 				err := fmt.Errorf("failed to delete replace pair new target %s/%s %w",
@@ -608,6 +636,15 @@ func (u *replaceUpdateTargetUpdater) GetTargetUpdateFinishStatus(_ context.Conte
 	if replaceNewTargetInfo == nil {
 		return
 	}
+	if replaceNewTargetInfo.GetDeletionTimestamp() != nil {
+		return false, "replacement is terminating", nil
+	}
+	if _, deleting := u.XsetLabelAnnoMgr.Get(replaceNewTargetInfo.Object, api.XDeletionIndicationLabelKey); deleting {
+		return false, "replacement is marked for deletion", nil
+	}
+	if targetUpdateInfo.UpdateRevision != nil && !IsTargetUpdatedRevision(replaceNewTargetInfo.Object, targetUpdateInfo.UpdateRevision.Name) {
+		return false, "replacement has not reached the desired revision", nil
+	}
 
 	return u.isTargetUpdatedServiceAvailable(replaceNewTargetInfo)
 }
@@ -616,7 +653,7 @@ func (u *replaceUpdateTargetUpdater) FinishUpdateTarget(ctx context.Context, tar
 	if finishByCancelUpdate {
 		// cancel replace update by removing to-replace and replace-by-update label from origin target
 		if targetInfo.IsInReplace {
-			patch := client.RawPatch(types.MergePatchType, fmt.Appendf(nil, `{"metadata":{"labels":{"%s":null, "%s":null}}}`, u.XsetLabelAnnoMgr.Value(api.XReplaceIndicationLabelKey), u.XsetLabelAnnoMgr.Value(api.XReplaceByReplaceUpdateLabelKey)))
+			patch := client.RawPatch(types.MergePatchType, fmt.Appendf(nil, `{"metadata":{"labels":{"%s":null, "%s":null},"annotations":{%q:null}}}`, u.XsetLabelAnnoMgr.Value(api.XReplaceIndicationLabelKey), u.XsetLabelAnnoMgr.Value(api.XReplaceByReplaceUpdateLabelKey), replacementPatchIntentAnnotation))
 			if err := u.TargetControl.PatchTarget(ctx, targetInfo.Object, patch); err != nil {
 				return fmt.Errorf("failed to patch replace pair target %s/%s %w when cancel replace update", targetInfo.GetNamespace(), targetInfo.GetName(), err)
 			}
