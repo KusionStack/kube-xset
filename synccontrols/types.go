@@ -81,6 +81,7 @@ type DecorationInfo struct {
 
 type TargetUpdateInfo struct {
 	*TargetWrapper
+	multiPatchIntent *replacementPatchIntent
 
 	UpdatedTarget client.Object
 

@@ -438,7 +438,7 @@ func (r *RealSyncControl) Replace(ctx context.Context, xsetObject api.XSetObject
 		syncContext.replacingMap = classifyTargetReplacingMapping(r.xsetLabelAnnoMgr, syncContext.activeTargets)
 	}()
 
-	needReplaceOriginTargets, needCleanLabelTargets, targetsNeedCleanLabels, needDeleteTargets := r.dealReplaceTargets(ctx, syncContext.TargetWrappers)
+	needReplaceOriginTargets, needCleanLabelTargets, targetsNeedCleanLabels, needDeleteTargets := r.dealReplaceTargets(ctx, syncContext.TargetWrappers, syncContext.MultiPatch)
 
 	// delete origin targets for replace
 	err = r.BatchDeleteTargetsByLabel(ctx, r.xControl, needDeleteTargets)

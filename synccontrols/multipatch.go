@@ -37,10 +37,14 @@ import (
 var ErrConcurrentPatchRolloutDisabled = errors.New("ConcurrentPatchRollout feature gate is disabled")
 
 type multiPatchIdentity struct {
-	ID           int
-	RevisionName string
-	Labels       map[string]string
-	New          bool
+	ID                 int
+	RevisionName       string
+	Labels             map[string]string
+	New                bool
+	Placeholder        bool
+	ReplaceOriginID    *int
+	IntentRevisionName string
+	IntentPatchIDs     []string
 }
 
 // MultiPatchSyncContext is the per-reconcile execution model. It translates
@@ -53,9 +57,11 @@ type MultiPatchSyncContext struct {
 	InstancePlans    map[int]xsetpatches.InstancePlan
 	CurrentPatchIDs  map[int][]string
 	DesiredRevisions map[int]*appsv1.ControllerRevision
-	Generation       int64
-	Suspended        bool
-	SyncError        error
+	// LogicalIDs groups physical replacement peers without hiding their own revisions.
+	LogicalIDs map[int]int
+	Generation int64
+	Suspended  bool
+	SyncError  error
 }
 
 func (r *RealSyncControl) prepareMultiPatch(ctx context.Context, xsetObject api.XSetObject, syncContext *SyncContext) error {
@@ -75,22 +81,9 @@ func (r *RealSyncControl) prepareMultiPatch(ctx context.Context, xsetObject api.
 	for _, wrapper := range syncContext.TargetWrappers {
 		wrappersByID[wrapper.ID] = wrapper
 	}
-	identities := make([]multiPatchIdentity, 0, len(syncContext.OwnedIds))
-	for id, detail := range syncContext.OwnedIds {
-		identity := multiPatchIdentity{ID: id}
-		if _, justCreated := r.resourceContextControl.Get(detail, api.EnumJustCreateContextDataKey); justCreated {
-			identity.New = true
-		}
-		if wrapper := wrappersByID[id]; wrapper != nil {
-			identity.Labels = wrapper.GetLabels()
-			if labels := wrapper.GetLabels(); labels != nil {
-				identity.RevisionName = labels[appsv1.ControllerRevisionHashLabelKey]
-			}
-		}
-		if identity.RevisionName == "" {
-			identity.RevisionName, _ = r.resourceContextControl.Get(detail, api.EnumRevisionContextDataKey)
-		}
-		identities = append(identities, identity)
+	identities, err := r.multiPatchIdentities(syncContext, wrappersByID, string(xsetObject.GetUID()))
+	if err != nil {
+		return err
 	}
 
 	state, err := buildMultiPatchExecutionState(
@@ -145,7 +138,7 @@ func (r *RealSyncControl) prepareMultiPatch(ctx context.Context, xsetObject api.
 	}
 
 	syncContext.MultiPatch = state
-	return nil
+	return r.publishPatchStates(ctx, xsetObject, syncContext)
 }
 
 func buildMultiPatchExecutionState(
@@ -179,23 +172,55 @@ func buildMultiPatchExecutionState(
 		return nil, fmt.Errorf("base revision not found")
 	}
 	resultStatus.BaseRevision = resolvedBase.Name
-	instanceStates := make([]xsetpatches.InstanceState, 0, len(identities))
 	currentByID := make(map[int][]string, len(identities))
+	intendedByID := make(map[int][]string)
+	replacementIDs := make(map[int]bool)
+	activePatchIDs := make(map[string]bool)
+	for _, identity := range identities {
+		if identity.ReplaceOriginID != nil {
+			replacementIDs[identity.ID], replacementIDs[*identity.ReplaceOriginID] = true, true
+		}
+	}
+	for _, patch := range plan.ActivePatches {
+		activePatchIDs[patch.ID] = true
+	}
 	for _, identity := range identities {
 		var currentPatchIDs []string
 		if identity.RevisionName != "" {
 			var found bool
 			currentPatchIDs, found = catalog.PatchIDsForRevision(identity.RevisionName)
-			if !found {
+			if !found && !(identity.Placeholder && replacementIDs[identity.ID]) {
 				return nil, fmt.Errorf("identity %d references unknown revision %q", identity.ID, identity.RevisionName)
 			}
 		} else if !identity.New {
 			return nil, fmt.Errorf("identity %d has no current revision", identity.ID)
 		}
 		currentByID[identity.ID] = append([]string(nil), currentPatchIDs...)
-		instanceStates = append(instanceStates, xsetpatches.InstanceState{
-			ID: identity.ID, AppliedPatchIDs: currentPatchIDs, Labels: identity.Labels, New: identity.New,
-		})
+		if identity.IntentRevisionName != "" {
+			ids, found := catalog.PatchIDsForRevision(identity.IntentRevisionName)
+			if identity.IntentPatchIDs != nil {
+				// Completed patches may have folded into Base since this intent
+				// was issued. The vector, unlike a historical revision alias,
+				// survives GC and is projected onto the current active journal.
+				ids = []string{}
+				for _, id := range identity.IntentPatchIDs {
+					if activePatchIDs[id] {
+						ids = append(ids, id)
+					}
+				}
+				found = true
+			}
+			// Old controllers stored only a revision label. If that alias was
+			// collected, derive a fresh target from actual members + commands;
+			// never fall back to the workload's full Head.
+			if found {
+				intendedByID[identity.ID] = ids
+			}
+		}
+	}
+	instanceStates, logicalIDs, err := logicalMultiPatchInstances(identities, currentByID, intendedByID, commandLabelPrefix, legacyCommandLabel)
+	if err != nil {
+		return nil, err
 	}
 
 	planned, err := xsetpatches.PlanInstances(plan, instanceStates, xsetpatches.PlanOptions{
@@ -206,10 +231,24 @@ func buildMultiPatchExecutionState(
 	if err != nil {
 		return nil, err
 	}
-	instancePlans := make(map[int]xsetpatches.InstancePlan, len(planned))
-	desiredRevisions := make(map[int]*appsv1.ControllerRevision, len(planned))
+	logicalPlans := make(map[int]xsetpatches.InstancePlan, len(planned))
 	for i := range planned {
-		item := planned[i]
+		logicalPlans[planned[i].ID] = planned[i]
+	}
+	instancePlans := make(map[int]xsetpatches.InstancePlan, len(identities))
+	desiredRevisions := make(map[int]*appsv1.ControllerRevision, len(identities))
+	for _, identity := range identities {
+		item := logicalPlans[logicalIDs[identity.ID]]
+		item.ID = identity.ID
+		item.CurrentPatchIDs = currentByID[identity.ID]
+		// A peer must never consume a command observed on the other object.
+		snapshot := make(map[string]string)
+		for key, value := range item.CommandSnapshot {
+			if observed, exists := identity.Labels[key]; exists && observed == value {
+				snapshot[key] = value
+			}
+		}
+		item.CommandSnapshot = snapshot
 		revision, found := catalog.RevisionFor(item.DesiredPatchIDs)
 		if !found {
 			return nil, fmt.Errorf("desired revision for identity %d patches %v not found", item.ID, item.DesiredPatchIDs)
@@ -230,6 +269,7 @@ func buildMultiPatchExecutionState(
 		InstancePlans:    instancePlans,
 		CurrentPatchIDs:  currentByID,
 		DesiredRevisions: desiredRevisions,
+		LogicalIDs:       logicalIDs,
 	}, nil
 }
 
@@ -293,42 +333,8 @@ func (r *RealSyncControl) calculateMultiPatchStatus(syncContext *SyncContext) {
 		}
 		statuses[patch.ID] = status
 	}
-	for _, wrapper := range syncContext.TargetWrappers {
-		if wrapper.PlaceHolder {
-			continue
-		}
-		current := state.CurrentPatchIDs[wrapper.ID]
-		planned, exists := state.InstancePlans[wrapper.ID]
-		if !exists {
-			continue
-		}
-		for patchID, status := range statuses {
-			if containsPatchID(planned.DesiredPatchIDs, patchID) {
-				status.SelectedReplicas++
-			}
-			if containsPatchID(current, patchID) {
-				status.UpdatedReplicas++
-				if ready, _ := r.xsetController.CheckReadyTime(wrapper.Object); ready {
-					status.ReadyReplicas++
-				}
-				if r.xsetController.CheckAvailable(wrapper.Object) {
-					status.AvailableReplicas++
-				}
-			}
-		}
-		for key, command := range planned.CommandSnapshot {
-			for _, status := range statuses {
-				if key != status.CommandLabelKey {
-					continue
-				}
-				switch command {
-				case xsetpatches.CommandApply:
-					status.PendingApplyCommands++
-				case xsetpatches.CommandRemove:
-					status.PendingRemoveCommands++
-				}
-			}
-		}
+	for patchID, status := range statuses {
+		r.calculateLogicalPatchReplicas(syncContext, patchID, status)
 	}
 	ids := make([]string, 0, len(statuses))
 	for id := range statuses {

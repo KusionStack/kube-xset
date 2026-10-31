@@ -61,6 +61,7 @@ func (r *RealSyncControl) attachTargetUpdateInfo(_ context.Context, xsetObject a
 		}
 		if syncContext.MultiPatch != nil {
 			updateInfo.CommandSnapshot = syncContext.MultiPatch.InstancePlans[target.ID].CommandSnapshot
+			updateInfo.multiPatchIntent = &replacementPatchIntent{Version: 1, OwnerUID: string(xsetObject.GetUID()), Revision: desiredRevision.Name, PatchIDs: append([]string{}, syncContext.MultiPatch.InstancePlans[target.ID].DesiredPatchIDs...)}
 		}
 
 		// decide this target current revision, or nil if not indicated
@@ -635,6 +636,15 @@ func (u *replaceUpdateTargetUpdater) GetTargetUpdateFinishStatus(_ context.Conte
 	if replaceNewTargetInfo == nil {
 		return
 	}
+	if replaceNewTargetInfo.GetDeletionTimestamp() != nil {
+		return false, "replacement is terminating", nil
+	}
+	if _, deleting := u.XsetLabelAnnoMgr.Get(replaceNewTargetInfo.Object, api.XDeletionIndicationLabelKey); deleting {
+		return false, "replacement is marked for deletion", nil
+	}
+	if targetUpdateInfo.UpdateRevision != nil && !IsTargetUpdatedRevision(replaceNewTargetInfo.Object, targetUpdateInfo.UpdateRevision.Name) {
+		return false, "replacement has not reached the desired revision", nil
+	}
 
 	return u.isTargetUpdatedServiceAvailable(replaceNewTargetInfo)
 }
@@ -643,7 +653,7 @@ func (u *replaceUpdateTargetUpdater) FinishUpdateTarget(ctx context.Context, tar
 	if finishByCancelUpdate {
 		// cancel replace update by removing to-replace and replace-by-update label from origin target
 		if targetInfo.IsInReplace {
-			patch := client.RawPatch(types.MergePatchType, fmt.Appendf(nil, `{"metadata":{"labels":{"%s":null, "%s":null}}}`, u.XsetLabelAnnoMgr.Value(api.XReplaceIndicationLabelKey), u.XsetLabelAnnoMgr.Value(api.XReplaceByReplaceUpdateLabelKey)))
+			patch := client.RawPatch(types.MergePatchType, fmt.Appendf(nil, `{"metadata":{"labels":{"%s":null, "%s":null},"annotations":{%q:null}}}`, u.XsetLabelAnnoMgr.Value(api.XReplaceIndicationLabelKey), u.XsetLabelAnnoMgr.Value(api.XReplaceByReplaceUpdateLabelKey), replacementPatchIntentAnnotation))
 			if err := u.TargetControl.PatchTarget(ctx, targetInfo.Object, patch); err != nil {
 				return fmt.Errorf("failed to patch replace pair target %s/%s %w when cancel replace update", targetInfo.GetNamespace(), targetInfo.GetName(), err)
 			}

@@ -256,6 +256,12 @@ func (r *xSetCommonReconciler) compactMultiPatchPlan(ctx context.Context, instan
 		return false, nil
 	}
 	operation.SetRevisionPlan(instance, compacted)
+	annotations := instance.GetAnnotations()
+	if annotations == nil {
+		annotations = make(map[string]string)
+	}
+	annotations[api.RevisionPlanCompactionAnnotation] = instance.GetResourceVersion()
+	instance.SetAnnotations(annotations)
 	if err := r.Client.Update(ctx, instance); err != nil {
 		return false, err
 	}

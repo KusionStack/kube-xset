@@ -168,8 +168,9 @@ func CompareTarget(l, r client.Object, checkReadyFunc func(object client.Object)
 }
 
 func afterOrZero(t1, t2 *metav1.Time) bool {
-	if t1.Time.IsZero() || t2.Time.IsZero() {
-		return t1.Time.IsZero()
+	zero1, zero2 := t1 == nil || t1.IsZero(), t2 == nil || t2.IsZero()
+	if zero1 || zero2 {
+		return zero1 && !zero2
 	}
 	return t1.After(t2.Time)
 }
